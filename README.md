@@ -170,7 +170,9 @@ Line endings are fine by default inside Linux. Don't set `core.autocrlf` there.
 
 Git **inside the dev container** does not get these credentials. The repo's container mounts only
 an SSH agent (see `developer-documentation/docs/reference/devcontainers/docker-and-git.md`).
-_TBC: confirm how push/pull from inside the container works on Windows._
+Confirmed on the first machine: with this setup, `git pull` **inside the container** asks for a
+GitHub login again. Git on the host (Windows and Ubuntu) works. Git inside the container needs an
+SSH key loaded in an `ssh-agent` in WSL. See `NOTES.md` > *Next: try a WSL-only setup*.
 
 ## 7. Open in the Dev Container
 
@@ -188,7 +190,7 @@ Then press `Ctrl+Shift+P` and run **Dev Containers: Reopen in Container**.
 What happens on open (from `.devcontainer/devcontainer.json`):
 
 1. `initializeCommand` runs in WSL. It generates `.devcontainer/compose.local.yaml` and builds the
-   image `noe:<branch>` (for example `noe:main`) locally. _TBC: first build took N min on this machine._
+   image `noe:<branch>` (for example `noe:main`) locally. The first build took about 7 minutes and produced a 6.4 GB image.
 2. Compose starts **postgres, openfga, redis, dapr-placement, dapr-scheduler** and the
    **workspace** container (project name `noe-main`).
 3. `postCreateCommand` runs `pnpm install` for the frontend and checks Docker access.
