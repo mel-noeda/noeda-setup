@@ -1,4 +1,6 @@
-# Noeda developer workstation - remove what 01-install-tools.ps1 installed.
+# Noeda developer workstation - remove the Windows-side tools of the OLD setup
+# (the Chocolatey-based 01-install-tools.ps1 on the main branch), e.g. when moving a
+# machine to the WSL-only setup:  .\02-uninstall-tools.ps1 --cursor --vscode --docker --git --gh
 #
 # Usage (from an ELEVATED PowerShell, unless --dry-run):
 #   .\02-uninstall-tools.ps1 --all
@@ -19,6 +21,7 @@ $components = [ordered]@{
     vscode = 'Visual Studio Code (choco package vscode)'
     docker = 'Docker Desktop (choco package docker-desktop) and your docker-users group membership'
     git    = 'Git for Windows incl. Git Credential Manager (choco package git)'
+    gh     = 'GitHub CLI for Windows (choco package gh)'
     wsl    = 'WSL2 itself, ALL installed distros and their files (e.g. Ubuntu, ~/work/noe), and the WSL / Virtual Machine Platform Windows features'
 }
 
@@ -26,12 +29,13 @@ function Show-Usage {
     Write-Host @"
 Usage: $scriptName <component flags> [--dry-run] [--yes]
 
-Removes tools installed by 01-install-tools.ps1. Choose what to remove:
+Removes Windows tools installed by the old Chocolatey setup. Choose what to remove:
 
   --cursor    $($components.cursor)
   --vscode    $($components.vscode)
   --docker    $($components.docker)
   --git       $($components.git)
+  --gh        $($components.gh)
   --wsl       $($components.wsl)
   --all       All of the above
 
@@ -40,7 +44,8 @@ Options:
   --yes       Skip the confirmation prompt for --wsl
   --help      Show this help
 
-Not covered: GitHub CLI (gh), installed separately -> choco uninstall gh -y
+Moving to the WSL-only setup: use --cursor --vscode --docker --git --gh (keep WSL).
+Run from your own elevated PowerShell, not a terminal inside another app.
 Run from an elevated PowerShell (Run as Administrator).
 "@
 }
@@ -145,6 +150,7 @@ foreach ($k in $plan) {
         'cursor' { Remove-ChocoPackage 'cursoride' }
         'vscode' { Remove-ChocoPackage 'vscode' }
         'git'    { Remove-ChocoPackage 'git' }
+        'gh'     { Remove-ChocoPackage 'gh' }
         'docker' {
             if ($dryRun) {
                 Write-Host "${prefix}Stop Docker Desktop if running"
