@@ -224,9 +224,28 @@ credentials needed). The full how-to is in the repo:
 
 ## Rollback
 
+Script: [`02-uninstall-tools.ps1`](02-uninstall-tools.ps1). Run from an **elevated** PowerShell.
+It removes only what you name. With no flags, or an unknown flag, it prints an error and the usage,
+and changes nothing.
+
 ```powershell
-wsl --unregister Ubuntu          # deletes the distro and everything in it
-choco uninstall docker-desktop cursoride vscode git -y
+.\02-uninstall-tools.ps1 --help                 # list the flags
+.\02-uninstall-tools.ps1 --cursor --vscode      # remove just the editors
+.\02-uninstall-tools.ps1 --all --dry-run        # show what --all would do (no admin needed)
+.\02-uninstall-tools.ps1 --all                  # remove everything 01-install-tools.ps1 installed
 ```
+
+| Flag | Removes |
+|---|---|
+| `--cursor` | Cursor (`cursoride`) |
+| `--vscode` | VS Code (`vscode`, plus `vscode.install`) |
+| `--docker` | Docker Desktop. Also takes you out of `docker-users`, and deletes the group if it is then empty |
+| `--git` | Git for Windows and Git Credential Manager (`git`, plus `git.install`) |
+| `--wsl` | **WSL itself and every distro in it, including their files** (for example `~/work/noe`). Also turns off the WSL / Virtual Machine Platform Windows features. Asks you to type `yes` first (`--yes` skips the prompt). Needs a reboot. |
+| `--all` | Everything above, in that order |
+
+Exit codes: `0` ok, `1` not elevated or no Chocolatey, `2` bad or missing flags, `3` WSL confirmation declined.
+A log goes to `uninstall-log.txt`. The GitHub CLI (`gh`) isn't installed by script 01, so the
+uninstall script doesn't remove it. To remove it: `choco uninstall gh -y`.
 
 Or use the System Restore point from step 0.

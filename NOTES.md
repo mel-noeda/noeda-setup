@@ -53,6 +53,13 @@ Points to check:
 - [ ] Docker starts automatically with WSL (Ubuntu has `systemd=true`)
 - [ ] Remove Docker Desktop and Git for Windows, and check that nothing on Windows still needs them
 
+## 2026-11-23
+
+- Added `02-uninstall-tools.ps1`. It takes one flag per component plus `--all`, and errors on no
+  flags or an unknown flag. `--dry-run` was tested for every flag. The real uninstall has **not**
+  been run yet. It will run for real when this machine is switched to the WSL-only setup
+  (probably `--docker --git`, keeping WSL and the editors).
+
 ### Other open items
 
 - [ ] Set global `git user.name` / `user.email` (still unset on this machine)
