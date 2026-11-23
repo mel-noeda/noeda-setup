@@ -154,6 +154,14 @@ Points to check:
     (`--browser chrome`) ran on this machine and became the default for links. The
     `--nobrowser` and `--browser firefox` installs have **not** been run for real yet.
 
+- **Dual boot: Windows clock exactly 1 h behind.** Linux stores UTC in the motherboard clock;
+  Windows reads it as local time (CET = UTC+1). Windows time sync had also never run ("Local
+  CMOS Clock, not synchronized"). WSL takes its clock from Windows, so a wrong clock can break
+  apt ("Release file is not valid yet") and TLS/sign-ins. Fix (admin PowerShell, run by the
+  user): `reg add "HKLM\SYSTEM\CurrentControlSet\Control\TimeZoneInformation" /v RealTimeIsUniversal /t REG_DWORD /d 1 /f`,
+  then Settings > Date & time > Set time automatically > Sync now. No reboot was needed.
+  Belongs in the README's troubleshooting section.
+
 ### Other open items
 
 - [ ] Set global `git user.name` / `user.email` (still unset on this machine)
