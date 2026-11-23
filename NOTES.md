@@ -164,6 +164,72 @@ Points to check:
 
 ### Other open items
 
-- [ ] Set global `git user.name` / `user.email` (still unset on this machine)
+- [x] Set global `git user.name` / `user.email` (done in Ubuntu by `03-setup-ubuntu.sh`; Windows has no Git any more)
 - [ ] Remove the unused Windows clone `C:\work\noe`
 - [ ] Fold the README's _TBC_ sections into final text
+
+## Reference: how Docker runs in the WSL-only setup
+
+Written 2026-11-23 in answer to: "Does WSL run as a Docker container? Where do the containers
+run? Can Docker Desktop on Windows see them? Would reinstalling Docker Desktop clash?"
+Intended for the README / developer docs.
+
+### What runs where
+
+```
+Windows 11
+└─ WSL2 utility VM (a small Hyper-V virtual machine with a real Linux kernel)
+   └─ Ubuntu (the distro)                       ← code in ~/work/noe, Cursor/VS Code, Chrome
+      ├─ dockerd + containerd (systemd services)  ← Docker Engine, installed by 03-setup-ubuntu.sh
+      │   socket: /var/run/docker.sock
+      └─ containers: noe workspace, postgres, openfga, redis, dapr …
+```
+
+- **WSL2 is not a Docker container.** It is a lightweight **virtual machine** that Windows
+  manages, running a real Linux kernel. Each distro (Ubuntu) runs inside that one VM, kept
+  separate from other distros, but it is not Docker.
+- **Docker Engine runs inside Ubuntu.** `dockerd` is an ordinary systemd service there.
+  Containers are Linux processes in the same VM, isolated the usual Docker way. There is no
+  extra VM per container.
+- **The dev container uses that same engine.** The editor runs `docker compose` in Ubuntu, and
+  `/var/run/docker.sock` is passed into the workspace container, so Testcontainers-based tests
+  start their containers on the same engine.
+
+### Seeing the containers from Windows
+
+Docker Desktop's GUI **cannot** show them: it only manages its own engine (in its own
+`docker-desktop` WSL distro) and has no option to attach to another engine. Alternatives:
+
+| Option | Notes |
+|---|---|
+| `docker ps` in an Ubuntu terminal | The direct way |
+| **Containers (Docker) extension** in Linux VS Code / Cursor | GUI for containers, images, logs, shells. noe's devcontainer already lists `ms-azuretools.vscode-docker`; also install it in the Linux editor. |
+| `wsl docker ps` from Windows PowerShell | Runs Ubuntu's `docker` command from Windows; no setup needed |
+| `lazydocker` (`brew install lazydocker`) | Full-screen terminal dashboard |
+| Windows `docker` CLI with a context pointing at Ubuntu | Possible over SSH (needs `sshd` in Ubuntu); more setup than it is worth |
+
+### Reinstalling Docker Desktop on Windows: it can clash
+
+With Docker Desktop's default setting (WSL integration on for the default distro):
+
+1. **It takes over the `docker` command in Ubuntu.** Desktop adds its own `docker` CLI there,
+   which talks to *Desktop's* engine. The same command then reaches a different engine with a
+   different image cache, so containers and the `noe:main` image seem to disappear.
+2. **It rewrites `~/.docker/config.json`** to use `"credsStore": "desktop.exe"`, which breaks
+   registry pulls when Desktop is not running. (`03-setup-ubuntu.sh` moves such a file aside.)
+3. **noe's devcontainer scripts change behaviour** when the engine reports `docker-desktop`,
+   for example in where `write_compose_local.sh` looks for the SSH agent socket.
+   `03-setup-ubuntu.sh` deliberately stops in that situation.
+4. **Ports collide.** With mirrored networking both engines publish on Windows `localhost`, so
+   two stacks cannot both use 5173, 8000 or 9090.
+5. **Resources and licensing.** Two engines in two VMs, plus Docker Desktop's subscription terms
+   for larger companies (more than 250 staff or $10M revenue).
+
+**If Docker Desktop is needed for something else**, it can coexist. In Docker Desktop, go to
+**Settings > Resources > WSL integration**, turn off **"Enable integration with my default WSL
+distro"**, and leave **Ubuntu** unticked. Each side then keeps its own engine: Windows tools use
+Desktop's, and Ubuntu keeps its own `docker` command and `dockerd`. Desktop still will not show
+Ubuntu's containers.
+
+**Recommendation for noe:** no Docker Desktop. Use the Containers extension or `lazydocker` for
+a visual view.
