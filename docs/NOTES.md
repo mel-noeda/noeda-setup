@@ -8,8 +8,8 @@ ones may describe things that have since changed.
 **Names changed since these notes were written:**
 `03-setup-ubuntu.sh` is now `02-setup-ubuntu.sh`; `02-uninstall-tools.ps1` is now
 `scripts/win-tools.ps1` (it can install as well as remove); `01-install-tools.ps1` (Chocolatey,
-Docker Desktop) no longer exists; see below. `02-setup-ubuntu.sh` no longer installs Python: the
-noe stack does that with pyenv.
+Docker Desktop) no longer exists; see below. `02-setup-ubuntu.sh` no longer installs Homebrew, pyenv or Python (see 2026-11-24): the
+developer sets up pyenv after cloning noe.
 
 ## Superseded: the Docker Desktop + Chocolatey approach (2026-11-20)
 
@@ -195,6 +195,30 @@ Points to check:
 
 - [x] Set global `git user.name` / `user.email` (done in Ubuntu by `02-setup-ubuntu.sh`; Windows has no Git any more)
 - [ ] Remove the unused Windows clone `C:\work\noe`
+
+## 2026-11-24: Homebrew and pyenv removed from the setup
+
+- **Decision:** `02-setup-ubuntu.sh` no longer installs Homebrew, `pyenv` or any Python. The
+  developer sets up pyenv after cloning noe, following the noe docs.
+- **Why:** pyenv from Homebrew on Linux worked badly. Homebrew itself was only there to supply
+  `gh` and `pyenv`, and it added about 3 minutes and a large install under `/home/linuxbrew`.
+  Earlier problems with this route: the Python version was read from noe's `dev/versions.env`
+  before noe had been cloned, so the pin was ignored on a first run (a review finding on PR #1),
+  and Python had to be built against Ubuntu's libraries with Homebrew kept off `PATH`.
+- **`gh` now comes from GitHub's own apt repository**, as in the
+  [official Debian/Ubuntu instructions](https://github.com/cli/cli/blob/trunk/docs/install_linux.md#debian):
+  keyring `/etc/apt/keyrings/githubcli-archive-keyring.gpg`, source
+  `/etc/apt/sources.list.d/github-cli.list`. It installs in the same `apt` run as Docker, VS Code
+  and Cursor, and updates with `sudo apt update && sudo apt install gh`.
+  The keyring file holds two keys. The 2022 key shows as expired (2026-09-05) and a key from
+  2026-04-07 signs the repository now, so `gpg --show-keys` warns, but `apt` works.
+- **Kept on purpose:** the apt build libraries for Python (`libssl-dev`, `zlib1g-dev`,
+  `libbz2-dev`, `libreadline-dev`, `libsqlite3-dev`, `libncursesw5-dev`, `tk-dev`, `libxml2-dev`,
+  `libxmlsec1-dev`, `libffi-dev`, `liblzma-dev`, `xz-utils`), so a later `pyenv install` just works.
+- The `~/.bashrc` block no longer has the `brew shellenv` and `pyenv init` lines. Because the
+  block is rewritten on every run, a machine set up earlier loses them when the script runs
+  again. Homebrew itself is **not** uninstalled by the script; remove it by hand if wanted.
+- **Not yet tested:** a full run on a fresh WSL install after this change.
 
 ## Reference: how Docker runs in the WSL-only setup
 

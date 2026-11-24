@@ -1,5 +1,5 @@
 # Noeda developer workstation - step 1 (Windows): install WSL2 + Ubuntu. Nothing else.
-# Everything else (Docker, Git, editors, pyenv) is installed inside Ubuntu by 02-setup-ubuntu.sh.
+# Everything else (Docker, Git, GitHub CLI, editors) is installed inside Ubuntu by 02-setup-ubuntu.sh.
 #
 # Usage:  powershell -ExecutionPolicy Bypass -File .\01-install-wsl.ps1
 # On a fresh machine run it twice: the first run installs WSL (then reboot), the second installs Ubuntu.

@@ -8,9 +8,10 @@
 # Interactive steps: sudo password, Git name/email, SSH key passphrase, GitHub sign-in.
 #
 # Installs / configures:
-#   apt (official vendor repos): Docker Engine + Compose + Buildx, VS Code, Cursor, Git, build deps
-#   Homebrew on Linux:           gh (GitHub CLI), pyenv. No Python is installed here; the noe stack
-#                                installs and pins its own (the build deps above are for pyenv).
+#   apt (official vendor repos): Docker Engine + Compose + Buildx, VS Code, Cursor, GitHub CLI (gh),
+#                                Git, and the libraries needed to build Python later with pyenv.
+#                                pyenv and Python are NOT installed: the developer sets them up
+#                                after cloning noe.
 #   SSH:                         ed25519 key, systemd ssh-agent, key registered on GitHub.
 #                                The noe dev container forwards this agent, so Git works inside it.
 #   WSL:                         /etc/wsl.conf (systemd on, Windows PATH not appended)
@@ -23,7 +24,6 @@ set -euo pipefail
 
 NOE_DIR="${NOE_DIR:-$HOME/work/noe}"
 NOE_REPO_SSH="git@github.com:Noeda-AI/noe.git"
-BREW_PREFIX="/home/linuxbrew/.linuxbrew"
 BLOCK_BEGIN="# >>> noeda-setup >>>"
 BLOCK_END="# <<< noeda-setup <<<"
 
@@ -32,7 +32,7 @@ MIRROR=""
 BROWSER_CHOICE=""
 BROWSER_PREF_FILE="$HOME/.config/noeda-setup/browser"
 USAGE="Usage: bash $(basename "$0") [--quiet] [--mirror CC] [--browser chrome|firefox | --nobrowser]
-  --quiet          hide apt/brew output
+  --quiet          hide apt output
   --mirror CC      use the Ubuntu country mirror CC.archive.ubuntu.com (e.g. de, ch, uk, us)
                    instead of archive.ubuntu.com - use it when 'apt-get update' hangs at
                    'Waiting for headers'
@@ -176,7 +176,7 @@ apt_install \
 info "git $(git --version | awk '{print $3}')"
 
 # ---------------------------------------------------------------- vendor apt repos
-step "Vendor apt repositories (Docker, VS Code, Cursor)"
+step "Vendor apt repositories (Docker, VS Code, Cursor, GitHub CLI)"
 sudo install -d -m 0755 /etc/apt/keyrings /usr/share/keyrings
 
 add_key() {   # url dest
@@ -226,9 +226,14 @@ Components: main
 Architectures: ${ARCH}
 Signed-By: /etc/apt/keyrings/cursor.asc"
 
+# GitHub CLI (https://github.com/cli/cli/blob/trunk/docs/install_linux.md#debian)
+add_key https://cli.github.com/packages/githubcli-archive-keyring.gpg /etc/apt/keyrings/githubcli-archive-keyring.gpg
+write_source /etc/apt/sources.list.d/github-cli.list "deb [arch=${ARCH} signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main"
+
 apt_update
 apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-apt_install code cursor
+apt_install code cursor gh
+info "gh $(gh --version | head -1 | awk '{print $3}')"
 
 # ---------------------------------------------------------------- browser (optional)
 step "Browser for development ($BROWSER_CHOICE)"
@@ -290,21 +295,6 @@ if [ -f "$HOME/.docker/config.json" ] && grep -q 'desktop\.exe' "$HOME/.docker/c
 fi
 sudo docker run --rm hello-world >/dev/null && info "hello-world container ran"
 
-# ---------------------------------------------------------------- homebrew
-step "Homebrew"
-if [ ! -x "$BREW_PREFIX/bin/brew" ]; then
-    NONINTERACTIVE=1 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-fi
-eval "$("$BREW_PREFIX/bin/brew" shellenv)"
-info "$(brew --version | head -1)"
-for formula in gh pyenv; do
-    if ! brew list --formula "$formula" >/dev/null 2>&1; then
-        info "Installing (brew): $formula"
-        if [ "$QUIET" -eq 1 ]; then brew install --quiet "$formula"; else brew install "$formula"; fi
-    fi
-done
-info "gh $(gh --version | head -1 | awk '{print $3}'), pyenv $(pyenv --version | awk '{print $2}')"
-
 # ---------------------------------------------------------------- shell setup
 step "Shell setup (~/.bashrc)"
 # Browser that Linux apps use for links (sign-ins, docs), from --browser.
@@ -316,9 +306,6 @@ esac
 SSH_SOCK_LINE='export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/openssh_agent"'
 BLOCK="$BLOCK_BEGIN
 # Managed by noeda-setup/02-setup-ubuntu.sh - edits inside this block are overwritten.
-eval \"\$($BREW_PREFIX/bin/brew shellenv)\"
-export PYENV_ROOT=\"\$HOME/.pyenv\"
-eval \"\$(pyenv init - bash)\"
 # Linux VS Code/Cursor via WSLg on purpose: skip their 'install the Windows app instead' prompt.
 export DONT_PROMPT_WSL_INSTALL=1
 # systemd user ssh-agent (ssh-agent.socket). The noe dev container forwards this socket.

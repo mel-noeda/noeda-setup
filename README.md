@@ -55,7 +55,7 @@ Open **Ubuntu** (Windows Terminal, the down-arrow menu, *Ubuntu*; or press Win+R
 bash '/mnt/c/Users/<you>/Downloads/noeda-setup/02-setup-ubuntu.sh' 2>&1 | tee ~/setup-ubuntu.log
 ```
 
-It installs Docker Engine, VS Code, Cursor, Chrome, Git, the GitHub CLI and pyenv, then creates
+It installs Docker Engine, VS Code, Cursor, Chrome, Git and the GitHub CLI, then creates
 an SSH key, registers it on GitHub, and clones noe to `~/work/noe`. It asks you for:
 
 1. your Linux password (for `sudo`),
@@ -105,7 +105,7 @@ Open http://localhost:5173 and sign in as `dev@example.com`.
   take over the `docker` command in Ubuntu. To see containers, use `docker ps` in Ubuntu or the
   Docker extension in the editor.
   It is possible to run your own Docker desktop on Windows if you need to for other reasons, but you must diable the "integrate with WSL option in your Docker Desktop settings. Further details are in the [NOTES](./docs/NOTES.md) file in the docs folder. 
-- **Python** is not installed by this setup, either on Windows or WSL. The noe stack installs and pins its own with pyenv.
+- **Python and pyenv are not installed by this setup**, on Windows or in Ubuntu. Set up pyenv yourself after the clone, following the noe repo's own docs. The libraries pyenv needs to build Python (`libssl-dev`, `zlib1g-dev` and so on) are already installed.
 - **NO IDEs or dev tools installed to Windows** This setup intentionally installs the tools and IDEs into WSL, with the idea that all development work takes place in that context. Paths, references, all of it stays the same as for standard No development on Mac or Linux, without the need for path rewriting or any specific logic to handle Windows architecture. This also means that that you can keep two identities: log in to your IDEs and tools using your Noeda account inside WSL, and install a separate instance of your favourite tools in Windows, allowing you to work on your personal projects in Widnows if you so wish. Orrrrrr you could simply install no developer tools whatsoever on your Windows box and keep it for your Call of Duty marathons, Sex and the City watch parties, Dance Dance Revolution dance-offs or whatever. It's all it's good for, really.
 
 ### Options for `02-setup-ubuntu.sh`
@@ -116,7 +116,7 @@ bash 02-setup-ubuntu.sh [--quiet] [--mirror CC] [--browser chrome|firefox | --no
 
 | Option | Effect |
 |---|---|
-| `--quiet` | Hide apt and Homebrew output |
+| `--quiet` | Hide apt output |
 | `--mirror de` | Use the Ubuntu mirror for a country (`de`, `ch`, `uk`, `us`, ...). Use it if `apt-get update` hangs at *Waiting for headers*. |
 | `--browser chrome` (default) | Google Chrome in Ubuntu, a separate browser for noe logins and cookies |
 | `--browser firefox` | Firefox from Mozilla's apt repository instead |

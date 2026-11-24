@@ -33,7 +33,7 @@ flowchart TB
 
     subgraph VM["WSL2 utility VM: Linux kernel, systemd"]
       subgraph Ubu["Ubuntu"]
-        Apps["VS Code, Cursor, Chrome<br/>git, gh, pyenv, Homebrew"]
+        Apps["VS Code, Cursor, Chrome<br/>git, gh"]
         Src["~/work/noe checkout"]
         Agent["ssh-agent<br/>systemd user service"]
         Dockerd["Docker Engine<br/>dockerd + containerd"]
@@ -76,17 +76,16 @@ flowchart TB
 | 1 | Preflight | Checks it is Ubuntu on WSL2 with systemd, not root, and that Docker Desktop is not providing `docker` |
 | 2 | WSL settings | Sets `systemd=true` and `appendWindowsPath=false` in `/etc/wsl.conf` |
 | 3 | apt sources | Adds retries and timeouts; switches to a country mirror with `--mirror` |
-| 4 | Base packages | Git, curl, build tools and the libraries pyenv needs to build Python |
-| 5 | Vendor repos | Adds the Docker, VS Code and Cursor apt repositories, then installs Docker Engine, VS Code and Cursor |
+| 4 | Base packages | Git, curl, build tools, and the libraries a later `pyenv install` needs to build Python |
+| 5 | Vendor repos | Adds the Docker, VS Code, Cursor and GitHub CLI apt repositories, then installs Docker Engine, VS Code, Cursor and `gh` |
 | 6 | Browser | Installs Chrome (default) or Firefox, or none with `--nobrowser` |
 | 7 | Docker Engine | Starts the service and adds the user to the `docker` group |
-| 8 | Homebrew | Installs Homebrew, then `gh` and `pyenv` |
-| 9 | Shell setup | Writes a managed block in `~/.bashrc` (brew, pyenv, `SSH_AUTH_SOCK`, `BROWSER`) and a browser opener |
-| 10 | Git identity | Asks for name and email if not set |
-| 11 | SSH | Creates an ed25519 key and starts the systemd `ssh-agent` |
-| 12 | GitHub | `gh auth login` (browser, device code), uploads the SSH public key, checks `ssh git@github.com` |
-| 13 | Editors | Installs the Dev Containers extension in VS Code and Cursor |
-| 14 | noe checkout | `git clone git@github.com:Noeda-AI/noe.git ~/work/noe` over SSH |
+| 8 | Shell setup | Writes a managed block in `~/.bashrc` (`SSH_AUTH_SOCK`, `BROWSER`, WSL prompt skip) and a browser opener |
+| 9 | Git identity | Asks for name and email if not set |
+| 10 | SSH | Creates an ed25519 key and starts the systemd `ssh-agent` |
+| 11 | GitHub | `gh auth login` (browser, device code), uploads the SSH public key, checks `ssh git@github.com` |
+| 12 | Editors | Installs the Dev Containers extension in VS Code and Cursor |
+| 13 | noe checkout | `git clone git@github.com:Noeda-AI/noe.git ~/work/noe` over SSH |
 
 ## What each script owns
 
