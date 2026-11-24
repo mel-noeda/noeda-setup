@@ -262,8 +262,14 @@ Both are optional; the default stays the Linux editors through WSLg. README sect
     client is left), and works the same with NAT or mirrored networking.
   - The script does not create a Windows key itself: a private key written from WSL onto NTFS
     can get permissions that Windows OpenSSH rejects.
-- **Not tested yet:** a full run of the new step, `ssh noe-wsl` from PowerShell, Remote-SSH from
-  Windows Cursor, and Git inside the dev container over that connection.
+- **Tested on the first machine (same day):** `ssh-keygen -t ed25519` in PowerShell, a rerun of
+  `02-setup-ubuntu.sh` (sshd on `127.0.0.1:2222`, `ssh.socket` disabled, Windows key
+  authorized, linger on, `noe-wsl` written to the Windows config), and **Windows Cursor
+  connected to `noe-wsl` with Remote-SSH**. The empty Windows `~/.ssh/config` that already
+  existed was appended to correctly.
+- **Still to test:** Git pull/push inside the dev container opened over this connection
+  (`echo $SSH_AUTH_SOCK` in Cursor's terminal before *Reopen in Container*, then *SSH agent:
+  mounted* in the container log).
 
 ## 2026-11-24: design option, the same setup on macOS and Linux hosts
 
