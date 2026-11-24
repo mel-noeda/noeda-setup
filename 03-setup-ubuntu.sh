@@ -9,8 +9,8 @@
 #
 # Installs / configures:
 #   apt (official vendor repos): Docker Engine + Compose + Buildx, VS Code, Cursor, Git, build deps
-#   Homebrew on Linux:           gh (GitHub CLI), pyenv
-#   pyenv:                       Python version pinned in noe's dev/versions.env (default 3.12)
+#   Homebrew on Linux:           gh (GitHub CLI), pyenv. No Python is installed here; the noe stack
+#                                installs and pins its own (the build deps above are for pyenv).
 #   SSH:                         ed25519 key, systemd ssh-agent, key registered on GitHub.
 #                                The noe dev container forwards this agent, so Git works inside it.
 #   WSL:                         /etc/wsl.conf (systemd on, Windows PATH not appended)
@@ -23,7 +23,6 @@ set -euo pipefail
 
 NOE_DIR="${NOE_DIR:-$HOME/work/noe}"
 NOE_REPO_SSH="git@github.com:Noeda-AI/noe.git"
-DEFAULT_PYTHON="3.12"
 BREW_PREFIX="/home/linuxbrew/.linuxbrew"
 BLOCK_BEGIN="# >>> noeda-setup >>>"
 BLOCK_END="# <<< noeda-setup <<<"
@@ -305,23 +304,6 @@ for formula in gh pyenv; do
     fi
 done
 info "gh $(gh --version | head -1 | awk '{print $3}'), pyenv $(pyenv --version | awk '{print $2}')"
-
-# ---------------------------------------------------------------- python
-step "Python (pyenv)"
-PY="$DEFAULT_PYTHON"
-if [ -f "$NOE_DIR/dev/versions.env" ]; then
-    PY="$(sed -n 's/^PYTHON_VERSION=//p' "$NOE_DIR/dev/versions.env" | tr -d '"'"'"' ')"
-    PY="${PY:-$DEFAULT_PYTHON}"
-fi
-export PYENV_ROOT="$HOME/.pyenv"
-# Build against Ubuntu's libraries, not Homebrew's: keep brew off PATH during the build.
-PYENV_BIN="$(command -v pyenv)"
-if ! "$PYENV_BIN" versions --bare | grep -q "^${PY}"; then
-    info "building Python ${PY} (a few minutes)..."
-    env PATH="/usr/bin:/bin" PKG_CONFIG_PATH="" "$PYENV_BIN" install -s "$PY"
-fi
-"$PYENV_BIN" global "$("$PYENV_BIN" versions --bare | grep "^${PY}" | tail -1)"
-info "python $("$PYENV_ROOT/shims/python" --version | awk '{print $2}') set as pyenv global"
 
 # ---------------------------------------------------------------- shell setup
 step "Shell setup (~/.bashrc)"

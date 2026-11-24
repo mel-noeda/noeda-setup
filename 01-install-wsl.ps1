@@ -1,5 +1,5 @@
 # Noeda developer workstation - step 1 (Windows): install WSL2 + Ubuntu. Nothing else.
-# Everything else (Docker, Git, editors, Python) is installed inside Ubuntu by 03-setup-ubuntu.sh.
+# Everything else (Docker, Git, editors, pyenv) is installed inside Ubuntu by 03-setup-ubuntu.sh.
 #
 # Run from an ELEVATED PowerShell (Run as Administrator), NOT from inside another app's
 # terminal (e.g. the Claude desktop app): sandboxed apps can redirect installs.
