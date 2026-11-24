@@ -2,7 +2,7 @@
 # Noeda developer workstation - set up Ubuntu in WSL2 with everything needed for noe.
 #
 # Run INSIDE Ubuntu as your normal user (not root). sudo will ask for your Linux password.
-#   bash 03-setup-ubuntu.sh
+#   bash 02-setup-ubuntu.sh
 #
 # Safe to run again: every step checks what is already there.
 # Interactive steps: sudo password, Git name/email, SSH key passphrase, GitHub sign-in.
@@ -119,7 +119,7 @@ info "Ubuntu ${VERSION_ID} (${VERSION_CODENAME})"
 [ -d /run/systemd/system ] || die "systemd is not running. Put 'systemd=true' under [boot] in /etc/wsl.conf, run 'wsl --shutdown' in Windows, then retry."
 
 if command -v docker >/dev/null 2>&1 && [ "$(docker info --format '{{.Name}}' 2>/dev/null || true)" = "docker-desktop" ]; then
-    die "Docker Desktop is still providing 'docker' here. Uninstall Docker Desktop on Windows first (02-uninstall-tools.ps1 --docker), then run 'wsl --shutdown' and retry."
+    die "Docker Desktop is still providing 'docker' here. Uninstall Docker Desktop on Windows first (.\scripts\win-tools.ps1 --docker --uninstall), then run 'wsl --shutdown' and retry."
 fi
 
 sudo -v || die "sudo is required."
@@ -315,7 +315,7 @@ case "$BROWSER_CHOICE" in
 esac
 SSH_SOCK_LINE='export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/openssh_agent"'
 BLOCK="$BLOCK_BEGIN
-# Managed by noeda-setup/03-setup-ubuntu.sh - edits inside this block are overwritten.
+# Managed by noeda-setup/02-setup-ubuntu.sh - edits inside this block are overwritten.
 eval \"\$($BREW_PREFIX/bin/brew shellenv)\"
 export PYENV_ROOT=\"\$HOME/.pyenv\"
 eval \"\$(pyenv init - bash)\"

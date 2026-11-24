@@ -1,7 +1,36 @@
 # Working notes
 
-Running log of findings and open items. They get folded into `README.md`, and later into the
-noe repo's `developer-documentation`.
+History, findings and decisions behind this repo. The current, working procedure is in the
+[README](../README.md), and the design is in [architecture.md](architecture.md). Read these notes
+for the *why* and for problems already solved. Entries are dated and kept as written, so older
+ones may describe things that have since changed.
+
+**Names changed since these notes were written:**
+`03-setup-ubuntu.sh` is now `02-setup-ubuntu.sh`; `02-uninstall-tools.ps1` is now
+`scripts/win-tools.ps1` (it can install as well as remove); `01-install-tools.ps1` (Chocolatey,
+Docker Desktop) no longer exists; see below. `02-setup-ubuntu.sh` no longer installs Python: the
+noe stack does that with pyenv.
+
+## Superseded: the Docker Desktop + Chocolatey approach (2026-11-20)
+
+The first version of this repo (still readable with `git show main:README.md`) installed Git for
+Windows, VS Code, Cursor and Docker Desktop with Chocolatey (`01-install-tools.ps1`), enabled
+Docker Desktop's WSL integration for Ubuntu, signed in to GitHub with Git Credential Manager and
+reused that credential in Ubuntu through `git-credential-manager.exe`. It worked, with caveats:
+
+- Git inside the dev container asked for a GitHub login again, because only an SSH agent is
+  forwarded into the container.
+- Several tools had to be installed and kept in step on two operating systems.
+- Docker Desktop brought its own engine, licence terms and clashes (see the last section).
+
+It was replaced by the WSL-only setup: Windows keeps only WSL2, everything else is in Ubuntu.
+Setup knowledge from that approach that still applies: expected, harmless Chocolatey warnings
+were `pending system reboot`, `No registry key found based on 'Microsoft Visual Studio Code'` and
+`Timeout waiting for Cursor process`. GCM lives under `ucrt64\bin` in Git for Windows 2.56+ and
+`mingw64\bin` before. Virtualization shows as `VirtualizationFirmwareEnabled = False` once a
+hypervisor runs, which is normal; check `(Get-CimInstance Win32_ComputerSystem).HypervisorPresent`.
+Docker Desktop on a company with more than 250 staff or $10M revenue needs a paid plan.
+
 
 ## 2026-11-20: first machine (Windows 11 Pro, Chocolatey)
 
@@ -55,7 +84,7 @@ Points to check:
 
 ## 2026-11-23
 
-- Added `02-uninstall-tools.ps1`. It takes one flag per component plus `--all`, and errors on no
+- Added `scripts/win-tools.ps1` (then called `02-uninstall-tools.ps1`). It takes one flag per component plus `--all`, and errors on no
   flags or an unknown flag. `--dry-run` was tested for every flag. The real uninstall has **not**
   been run yet. It will run for real when this machine is switched to the WSL-only setup
   (probably `--docker --git`, keeping WSL and the editors).
@@ -72,13 +101,13 @@ Points to check:
   search result labelled *App*.
 
 - **Keep the setup repo separate from noe.** A new developer should never clone noe on Windows
-  and then copy it into Linux. `03-setup-ubuntu.sh` clones noe straight into `~/work/noe` over
+  and then copy it into Linux. `02-setup-ubuntu.sh` clones noe straight into `~/work/noe` over
   SSH, so the script is the only file they need. The noe docs should link to it and start at
   "Reopen in Container".
   - **Bootstrap problem:** a fresh machine has no Git on Windows and no GitHub login in Ubuntu
     (the script sets that up). With a private repo, the script cannot be downloaded without
     signing in. Options: (1) a **public** repo, ideally under `Noeda-AI`, allowing
-    `curl -fsSL https://raw.githubusercontent.com/<org>/noeda-setup/main/03-setup-ubuntu.sh -o setup.sh && bash setup.sh`;
+    `curl -fsSL https://raw.githubusercontent.com/<org>/noeda-setup/main/02-setup-ubuntu.sh -o setup.sh && bash setup.sh`;
     (2) a private repo, with the file downloaded through the browser and run from `/mnt/c/...`;
     (3) a download on the docs site. **Decision pending.**
 
@@ -99,7 +128,7 @@ Points to check:
   - `%UserProfile%\.wslconfig` with `[wsl2] networkingMode=mirrored` and `dnsTunneling=true`,
     then `wsl --shutdown`. WSL went to **4.4 MB/s**. `01-install-wsl.ps1` now writes this file
     when none exists.
-  - `03-setup-ubuntu.sh --mirror de` (any 2-letter country code) switches Ubuntu's sources to a
+  - `02-setup-ubuntu.sh --mirror de` (any 2-letter country code) switches Ubuntu's sources to a
     country mirror. apt now retries, with 30 s timeouts.
 
 - **Linux `cursor` launcher blocks on a hidden prompt in WSL.** `/usr/bin/cursor` detects WSL
@@ -125,10 +154,10 @@ Points to check:
 - `gh` warns "Authentication credentials saved in plain text": WSL has no desktop keyring, so
   the token is in `~/.config/gh/hosts.yml` (mode 600). This is acceptable for a personal
   workstation; document it. The SSH key is protected by its passphrase.
-- Clean run of `03-setup-ubuntu.sh` (apt already done): **335 s**. Homebrew + gh + pyenv took
+- Clean run of `02-setup-ubuntu.sh` (apt already done): **335 s**. Homebrew + gh + pyenv took
   about 3 min and the Python 3.12 build about 1 min.
 
-- **A browser in Ubuntu for noe development: Chrome by default.** `03-setup-ubuntu.sh` installs
+- **A browser in Ubuntu for noe development: Chrome by default.** `02-setup-ubuntu.sh` installs
   a Linux browser, so dev logins and cookies (`dev@example.com` on `localhost:5173`, staging)
   stay apart from everyday Windows browsing. WSLg rendering quirks were judged acceptable.
 
@@ -164,9 +193,8 @@ Points to check:
 
 ### Other open items
 
-- [x] Set global `git user.name` / `user.email` (done in Ubuntu by `03-setup-ubuntu.sh`; Windows has no Git any more)
+- [x] Set global `git user.name` / `user.email` (done in Ubuntu by `02-setup-ubuntu.sh`; Windows has no Git any more)
 - [ ] Remove the unused Windows clone `C:\work\noe`
-- [ ] Fold the README's _TBC_ sections into final text
 
 ## Reference: how Docker runs in the WSL-only setup
 
@@ -180,7 +208,7 @@ Intended for the README / developer docs.
 Windows 11
 └─ WSL2 utility VM (a small Hyper-V virtual machine with a real Linux kernel)
    └─ Ubuntu (the distro)                       ← code in ~/work/noe, Cursor/VS Code, Chrome
-      ├─ dockerd + containerd (systemd services)  ← Docker Engine, installed by 03-setup-ubuntu.sh
+      ├─ dockerd + containerd (systemd services)  ← Docker Engine, installed by 02-setup-ubuntu.sh
       │   socket: /var/run/docker.sock
       └─ containers: noe workspace, postgres, openfga, redis, dapr …
 ```
@@ -216,10 +244,10 @@ With Docker Desktop's default setting (WSL integration on for the default distro
    which talks to *Desktop's* engine. The same command then reaches a different engine with a
    different image cache, so containers and the `noe:main` image seem to disappear.
 2. **It rewrites `~/.docker/config.json`** to use `"credsStore": "desktop.exe"`, which breaks
-   registry pulls when Desktop is not running. (`03-setup-ubuntu.sh` moves such a file aside.)
+   registry pulls when Desktop is not running. (`02-setup-ubuntu.sh` moves such a file aside.)
 3. **noe's devcontainer scripts change behaviour** when the engine reports `docker-desktop`,
    for example in where `write_compose_local.sh` looks for the SSH agent socket.
-   `03-setup-ubuntu.sh` deliberately stops in that situation.
+   `02-setup-ubuntu.sh` deliberately stops in that situation.
 4. **Ports collide.** With mirrored networking both engines publish on Windows `localhost`, so
    two stacks cannot both use 5173, 8000 or 9090.
 5. **Resources and licensing.** Two engines in two VMs, plus Docker Desktop's subscription terms

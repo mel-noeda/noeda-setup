@@ -1,251 +1,161 @@
-# Noeda Developer Workstation Setup (Windows 11)
+# Noeda developer workstation setup (Windows)
 
-How to set up a new Windows 11 machine to develop on the Noeda codebase
-(`github.com/Noeda-AI/noe`) with **Dev Containers** in VS Code or Cursor.
+Sets up a Windows 11 PC to develop on [`Noeda-AI/noe`](https://github.com/Noeda-AI/noe) with
+Dev Containers. **You need nothing installed beforehand except PowerShell.**
 
-> Written while setting up the first machine (2026-11-20).
-> The repo's own dev container docs are
-> `developer-documentation/docs/howto/dev-containers.md`. They assume macOS.
-> This page adds the Windows-specific steps.
+Two scripts do the work:
 
-## Why WSL2, and not a `C:\` checkout
+| Script | Runs in | Does |
+|---|---|---|
+| [`01-install-wsl.ps1`](01-install-wsl.ps1) | Windows (admin PowerShell) | Installs WSL2 and Ubuntu |
+| [`02-setup-ubuntu.sh`](02-setup-ubuntu.sh) | Ubuntu | Installs everything else inside Ubuntu and clones noe |
 
-The repo's `.devcontainer` runs bash scripts on the **host** (`initializeCommand`). It mounts the
-checkout into the container **at the same path as on the host**, and uses that path as the
-container working directory (`"workspaceFolder": "${localWorkspaceFolder}"`).
+Everything lives inside Ubuntu: Docker, Git, editors, browser, and the code. Windows only hosts
+WSL. The stack and the order of events are drawn in [docs/architecture.md](docs/architecture.md).
 
-With a checkout on `C:\` this breaks. The scripts produce `/c/work/noe`, while the editor
-expects `c:\work\noe` inside a Linux container. Bind mounts from the Windows drive are also
-very slow for a monorepo.
+## What you need
 
-**So on Windows the checkout lives inside a WSL2 Linux distro (Ubuntu)**, for example
-`/home/<you>/work/noe`. The editor connects to WSL first and then reopens in the container.
-Inside WSL everything behaves as on Linux.
+- Windows 11 (tested on Pro, build 26300), 16 GB RAM or more, and local administrator rights.
+- CPU virtualization turned on in the BIOS/UEFI (Intel VT-x or AMD-V/SVM).
+- A GitHub account that is a member of the `Noeda-AI` organisation.
+- An internet connection. Step 3 downloads roughly 500 MB of packages; the first container build adds a 6 GB image.
 
-```
-Windows (VS Code / Cursor UI)
-  └─ WSL2: Ubuntu  ── checkout: ~/work/noe, initializeCommand runs here
-        └─ Docker Desktop engine (WSL2 backend)
-              └─ Compose project noe-main: workspace + postgres, openfga, redis, dapr
-```
+## Setup
 
----
+### 1. Download
 
-## 0. Prerequisites
+On the GitHub page of this repository, choose **Code > Download ZIP**, then extract it anywhere
+(for example in Downloads).
 
-| Requirement | Notes |
-|---|---|
-| Windows 11 Pro (tested on build 26300) | |
-| CPU virtualization enabled in BIOS/UEFI | After WSL is installed, `(Get-CimInstance Win32_ComputerSystem).HypervisorPresent` should be `True`. Ignore `VirtualizationFirmwareEnabled = False` once a hypervisor is running; Windows always reports it like that. |
-| 16 GB+ RAM (32 GB+ recommended) | Docker + the infra stack + the build are memory-hungry |
-| Local administrator rights | For Chocolatey, WSL and Docker installs |
-| GitHub account with access to `Noeda-AI/noe` | The repo is **private** |
-| [Chocolatey](https://chocolatey.org/install) installed | The only thing installed beforehand |
+### 2. Install WSL and Ubuntu (Windows)
 
-**Recommended:** create a System Restore point before you start
-(`Start > "Create a restore point" > Create…`).
-
----
-
-## 1. Install the tooling (one elevated script)
-
-Script: [`01-install-tools.ps1`](01-install-tools.ps1)
-
-From an **elevated** PowerShell (right-click > *Run as administrator*):
+Open **PowerShell as administrator** (Start menu, type *PowerShell*, right-click, *Run as
+administrator*). Go to the extracted folder (type `cd `, then drag the folder into the window)
+and run:
 
 ```powershell
-Set-ExecutionPolicy -Scope Process Bypass -Force
-C:\work\noeda-setup\01-install-tools.ps1
+powershell -ExecutionPolicy Bypass -File .\01-install-wsl.ps1
 ```
 
-What it does:
+On a fresh machine this takes two runs:
 
-1. `wsl --install --no-distribution` enables WSL2 and the Virtual Machine Platform.
-2. `choco install`:
+1. The first run installs WSL. It then tells you to **reboot**.
+2. After the reboot, run the same command again. It installs Ubuntu and, when asked, you create a
+   **Linux username and password**. They are local to WSL and unrelated to your Windows or
+   GitHub account. You need the password for `sudo`.
 
-   | Package | Version tested | What |
-   |---|---|---|
-   | `git` | 2.56.1 | Git for Windows, including **Git Credential Manager** (GCM) |
-   | `vscode` | 1.146.0 | Visual Studio Code |
-   | `cursoride` | 3.30.14 | Cursor (per-user install, `%LOCALAPPDATA%\Programs\cursor`) |
-   | `docker-desktop` | 4.99.0 | Docker Desktop (WSL2 backend) |
+When it says *Ubuntu is installed*, it prints the exact command for the next step.
 
-3. Adds the current user to the local `docker-users` group.
-   Elevate using **your own** account. If you elevate with a different admin account,
-   that account is added to the group instead.
+### 3. Set up Ubuntu
 
-A log goes to `install-log.txt` next to the script. Expected, harmless warnings:
-`pending system reboot`, `No registry key found based on 'Microsoft Visual Studio Code'`,
-`Timeout waiting for Cursor process`.
-
-### ➜ Reboot
-
-WSL2 and Docker Desktop do not work until Windows restarts.
-
----
-
-## 2. Docker Desktop first run
-
-1. Start **Docker Desktop** from the Start menu and accept the Subscription Service Agreement.
-   Check whether your organisation needs a paid Docker plan (companies with more than 250 staff
-   or more than $10M revenue). Docker Hub sign-in is optional.
-2. Check that it works (PowerShell):
-
-   ```powershell
-   docker version
-   docker run --rm hello-world
-   ```
-
----
-
-## 3. Install Ubuntu in WSL
-
-```powershell
-wsl --install -d Ubuntu
-```
-
-On first start it asks you to create a **Linux username and password**. These are local to
-WSL and not linked to your Windows or GitHub account. You need the password for `sudo`.
-
-Then in Docker Desktop: **Settings > Resources > WSL integration**, turn on **Ubuntu**, and click
-**Apply & restart**. Check inside Ubuntu:
+Open **Ubuntu** (Windows Terminal, the down-arrow menu, *Ubuntu*; or press Win+R and run
+`wsl ~`). Run the command printed by step 2. It looks like this:
 
 ```bash
-docker version
+bash '/mnt/c/Users/<you>/Downloads/noeda-setup/02-setup-ubuntu.sh' 2>&1 | tee ~/setup-ubuntu.log
 ```
 
----
+It installs Docker Engine, VS Code, Cursor, Chrome, Git, the GitHub CLI and pyenv, then creates
+an SSH key, registers it on GitHub, and clones noe to `~/work/noe`. It asks you for:
 
-## 4. Editor extensions
+1. your Linux password (for `sudo`),
+2. your name and email for Git commits,
+3. a passphrase for the new SSH key (recommended),
+4. a GitHub sign-in: open the URL it shows, enter the code, and authorize.
 
-```powershell
-code --install-extension ms-vscode-remote.remote-wsl
-code --install-extension ms-vscode-remote.remote-containers
-```
+It is safe to run again if anything fails or you want to update; every step checks what is
+already there. If it ends with *Restart WSL*, run `wsl --shutdown` in PowerShell, then open
+Ubuntu again.
 
-Cursor ships its own equivalents (`anysphere.remote-wsl`, `anysphere.remote-containers`).
-They are pre-installed, so Cursor needs nothing extra. Microsoft's remote extensions are not
-licensed for Cursor.
+The clone only works if your GitHub account has access to `Noeda-AI/noe`. If you don't have it
+yet, ask an organisation admin, then run the script again.
 
----
+### 4. Open noe in its dev container
 
-## 5. GitHub sign-in (first time, on Windows)
-
-The repo is private. Git Credential Manager (GCM, part of Git for Windows) handles sign-in.
-Do it once from a normal Windows PowerShell. Cloning is the easiest trigger:
-
-```powershell
-git clone https://github.com/Noeda-AI/noe C:\work\noe-signin-test
-```
-
-1. The terminal prints `info: please complete authentication in your browser...`
-2. In the browser: sign in to GitHub, complete 2FA, and **Authorize Git Credential Manager**.
-3. The token is stored in **Windows Credential Manager** (`git:https://github.com`).
-
-You can then delete that test clone. The real checkout lives in WSL (next step).
-
-> This must run in an interactive terminal. Non-interactive shells fail with
-> `terminal prompts disabled`.
-
-## 6. Git inside Ubuntu, then clone
-
-Open **Ubuntu** from the Start menu (or `wsl -d Ubuntu`) and run:
-
-```bash
-# Reuse the Windows GitHub sign-in: no separate credentials in Linux
-git config --global credential.helper "/mnt/c/Program\ Files/Git/ucrt64/bin/git-credential-manager.exe"
-git config --global user.name  "Your Name"
-git config --global user.email "you@example.com"
-git config --global init.defaultBranch main
-
-mkdir -p ~/work && cd ~/work
-git clone https://github.com/Noeda-AI/noe
-```
-
-> GCM path: Git for Windows 2.56+ installs it under `ucrt64\bin`. Older versions use
-> `mingw64\bin`. Check with
-> `Get-ChildItem 'C:\Program Files\Git' -Recurse -Filter git-credential-manager.exe`.
-
-Line endings are fine by default inside Linux. Don't set `core.autocrlf` there.
-
-Git **inside the dev container** does not get these credentials. The repo's container mounts only
-an SSH agent (see `developer-documentation/docs/reference/devcontainers/docker-and-git.md`).
-Confirmed on the first machine: with this setup, `git pull` **inside the container** asks for a
-GitHub login again. Git on the host (Windows and Ubuntu) works. Git inside the container needs an
-SSH key loaded in an `ssh-agent` in WSL. See `NOTES.md` > *Next: try a WSL-only setup*.
-
-## 7. Open in the Dev Container
-
-From the Ubuntu shell:
+In Ubuntu:
 
 ```bash
 cd ~/work/noe
-code .        # VS Code: opens a window connected to WSL ("WSL: Ubuntu" bottom-left)
-# or
-cursor .      # Cursor
+cursor .        # or: code .
 ```
 
-Then press `Ctrl+Shift+P` and run **Dev Containers: Reopen in Container**.
+Start the editor from this Ubuntu shell so it inherits your SSH agent. The window shows
+**WSL: Ubuntu** at the bottom left. Press `Ctrl+Shift+P`, run **Dev Containers: Reopen in
+Container**, and wait. The first build takes about 7 minutes and a 6 GB image.
 
-What happens on open (from `.devcontainer/devcontainer.json`):
-
-1. `initializeCommand` runs in WSL. It generates `.devcontainer/compose.local.yaml` and builds the
-   image `noe:<branch>` (for example `noe:main`) locally. The first build took about 7 minutes and produced a 6.4 GB image.
-2. Compose starts **postgres, openfga, redis, dapr-placement, dapr-scheduler** and the
-   **workspace** container (project name `noe-main`).
-3. `postCreateCommand` runs `pnpm install` for the frontend and checks Docker access.
-
-The application itself does **not** start automatically. In a terminal inside the container:
+Then, in a terminal inside the container, start the app (see the noe repo's
+`developer-documentation/docs/howto/dev-containers.md` for details):
 
 ```bash
+# These steps may vary if the Noe app is changed: the Noe Github repo is the source of truth for this
 cd companion_backend
-cp env.examples/.env.example .env      # first time in this checkout
+cp env.examples/.env.example .env      # first time only
 ./run_backend.sh --frontend --bootstrap dev@example.com
 ```
 
-Open http://localhost:5173 and sign in as `dev@example.com` (local loopback issuer, no cloud
-credentials needed). The full how-to is in the repo:
-`developer-documentation/docs/howto/dev-containers.md`.
+Open http://localhost:5173 and sign in as `dev@example.com`.
 
----
+## Good to know
 
-## Troubleshooting
+- **Your code is on the Linux side.** `~/work/noe` in Ubuntu is not `C:\work\noe`. From Windows,
+  browse it at `\\wsl.localhost\Ubuntu\home\<you>\work\noe`. Keep all code there: the dev
+  container needs Linux paths, and it is much faster than `C:`.
+- **Git works inside the container** because your SSH agent is forwarded into it.
+- **No Docker Desktop on Windows.** Docker Engine runs inside Ubuntu. Docker Desktop is not needed and can
+  take over the `docker` command in Ubuntu. To see containers, use `docker ps` in Ubuntu or the
+  Docker extension in the editor.
+  It is possible to run your own Docker desktop on Windows if you need to for other reasons, but you must diable the "integrate with WSL option in your Docker Desktop settings. Further details are in the [NOTES](./docs/NOTES.md) file in the docs folder. 
+- **Python** is not installed by this setup, either on Windows or WSL. The noe stack installs and pins its own with pyenv.
+- **NO IDEs or dev tools installed to Windows** This setup intentionally installs the tools and IDEs into WSL, with the idea that all development work takes place in that context. Paths, references, all of it stays the same as for standard No development on Mac or Linux, without the need for path rewriting or any specific logic to handle Windows architecture. This also means that that you can keep two identities: log in to your IDEs and tools using your Noeda account inside WSL, and install a separate instance of your favourite tools in Windows, allowing you to work on your personal projects in Widnows if you so wish. Orrrrrr you could simply install no developer tools whatsoever on your Windows box and keep it for your Call of Duty marathons, Sex and the City watch parties, Dance Dance Revolution dance-offs or whatever. It's all it's good for, really.
+
+### Options for `02-setup-ubuntu.sh`
+
+```bash
+bash 02-setup-ubuntu.sh [--quiet] [--mirror CC] [--browser chrome|firefox | --nobrowser]
+```
+
+| Option | Effect |
+|---|---|
+| `--quiet` | Hide apt and Homebrew output |
+| `--mirror de` | Use the Ubuntu mirror for a country (`de`, `ch`, `uk`, `us`, ...). Use it if `apt-get update` hangs at *Waiting for headers*. |
+| `--browser chrome` (default) | Google Chrome in Ubuntu, a separate browser for noe logins and cookies |
+| `--browser firefox` | Firefox from Mozilla's apt repository instead |
+| `--nobrowser` | No browser in Ubuntu; links open in your Windows browser |
+
+## Troubleshooting/Known Issues
 
 | Symptom | Fix |
 |---|---|
-| Docker Desktop: "WSL 2 installation is incomplete" | Reboot, then run `wsl --update` in an elevated PowerShell |
-| `docker: command not found` inside Ubuntu | Docker Desktop > Settings > Resources > WSL integration > enable Ubuntu |
-| `docker: permission denied` on Windows | Sign out and back in, so the `docker-users` membership applies |
-| `/bin/bash^M: bad interpreter` | Checkout has CRLF line endings. Clone inside WSL, not on `C:\` |
-| `[UriError]: If a URI contains an authority component, then the path component must either be empty or begin with a slash` on Reopen in Container | You opened a **Windows** folder (for example `C:\work\noe`). The repo's `workspaceFolder` is `${localWorkspaceFolder}`, which must be a Linux path. Open the WSL checkout instead: in Ubuntu run `cd ~/work/noe && cursor .`, or from Windows run `cursor --remote wsl+Ubuntu /home/<you>/work/noe`. The bottom-left corner must show **WSL: Ubuntu** before you reopen in the container. |
-| `cursor: command not found` in Ubuntu (while `code` works) | Cursor is a per-user install under `%LOCALAPPDATA%\Programs\cursor`. If the installer ran from inside a sandboxed (MSIX) app, such as the Claude desktop app's terminal, Windows redirected the files into that app's private storage. Reinstall from a normal elevated PowerShell (`choco install cursoride -y --force`), then open a new Ubuntu window. Check: `ls "$LOCALAPPDATA/Programs/cursor/resources/app/bin"` from Windows shows `cursor` and `cursor.cmd`. |
-| `terminal prompts disabled` on clone | Run the clone in a normal interactive terminal |
-| Virtualization errors | Enable Intel VT-x / AMD-V (SVM) in BIOS/UEFI |
+| `running scripts is disabled on this system` | Use the full command from step 2, with `-ExecutionPolicy Bypass`. It changes no system setting. |
+| Start-menu search shows an *Ubuntu* Store app | Don't install it. Open Ubuntu from Windows Terminal, or run `wsl ~` (Win+R). |
+| Downloads inside Ubuntu are very slow, or `apt` seems stuck | Run `wsl --shutdown`, then the script again, with `--mirror <country code>`. `01-install-wsl.ps1` already enables mirrored networking in `%UserProfile%\.wslconfig`. |
+| `apt` says *Release file is not valid yet*, or sign-ins fail (dual boot with Linux) | The Windows clock is wrong. In an admin PowerShell: `reg add "HKLM\SYSTEM\CurrentControlSet\Control\TimeZoneInformation" /v RealTimeIsUniversal /t REG_DWORD /d 1 /f`, then *Settings > Time & language > Date & time > Sync now*. |
+| `docker: permission denied` in Ubuntu | Run `wsl --shutdown` in PowerShell and reopen Ubuntu, so your new `docker` group applies. |
+| *Reopen in Container* fails with `[UriError]` | You opened a Windows folder. Open the Ubuntu checkout: `cd ~/work/noe && cursor .`. The bottom left must show **WSL: Ubuntu**. |
+| The script stops with *Docker Desktop is still providing 'docker'* | Remove Docker Desktop: `.\scripts\win-tools.ps1 --docker --uninstall`, then `wsl --shutdown`, then run the script again. |
+| Virtualization or WSL errors at install | Enable Intel VT-x or AMD-V (SVM) in the BIOS/UEFI. |
 
-## Rollback
+More detail on every one of these is in [docs/NOTES.md](docs/NOTES.md).
 
-Script: [`02-uninstall-tools.ps1`](02-uninstall-tools.ps1). Run from an **elevated** PowerShell.
-It removes only what you name. With no flags, or an unknown flag, it prints an error and the usage,
-and changes nothing.
+## Managing/Cleaning up Windows tools
+
+If a machine was set up the old way (Docker Desktop, Git for Windows and so on), or you want a
+Windows tool back, use [`scripts/win-tools.ps1`](scripts/win-tools.ps1). It prints a table of
+what is installed, then installs or removes the tools you pick. Run it from an admin PowerShell:
 
 ```powershell
-.\02-uninstall-tools.ps1 --help                 # list the flags
-.\02-uninstall-tools.ps1 --cursor --vscode      # remove just the editors
-.\02-uninstall-tools.ps1 --all --dry-run        # show what --all would do (no admin needed)
-.\02-uninstall-tools.ps1 --all                  # remove everything 01-install-tools.ps1 installed
+powershell -ExecutionPolicy Bypass -File .\scripts\win-tools.ps1                      # table, then asks what to do
+powershell -ExecutionPolicy Bypass -File .\scripts\win-tools.ps1 --gh --install
+powershell -ExecutionPolicy Bypass -File .\scripts\win-tools.ps1 --docker --git --uninstall
+powershell -ExecutionPolicy Bypass -File .\scripts\win-tools.ps1 --all --uninstall --dry-run
 ```
 
-| Flag | Removes |
-|---|---|
-| `--cursor` | Cursor (`cursoride`) |
-| `--vscode` | VS Code (`vscode`, plus `vscode.install`) |
-| `--docker` | Docker Desktop. Also takes you out of `docker-users`, and deletes the group if it is then empty |
-| `--git` | Git for Windows and Git Credential Manager (`git`, plus `git.install`) |
-| `--wsl` | **WSL itself and every distro in it, including their files** (for example `~/work/noe`). Also turns off the WSL / Virtual Machine Platform Windows features. Asks you to type `yes` first (`--yes` skips the prompt). Needs a reboot. |
-| `--all` | Everything above, in that order |
+Tools: `--cursor --vscode --docker --git --gh --wsl` (or `--all`). Add `--dry-run` to see what
+would happen without changing anything, `--list` for the table only, and `--help` for the rest.
+Removing WSL deletes every distro and its files, so it asks you to type `yes` first.
 
-Exit codes: `0` ok, `1` not elevated or no Chocolatey, `2` bad or missing flags, `3` WSL confirmation declined.
-A log goes to `uninstall-log.txt`. The GitHub CLI (`gh`) isn't installed by script 01, so the
-uninstall script doesn't remove it. To remove it: `choco uninstall gh -y`.
+## Documentation
 
-Or use the System Restore point from step 0.
+- [docs/architecture.md](docs/architecture.md): the stack and the order of operations, as diagrams.
+- [docs/NOTES.md](docs/NOTES.md): working notes, findings and history, including the earlier
+  Docker Desktop approach and why it was dropped.
