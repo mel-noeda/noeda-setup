@@ -19,6 +19,10 @@
 #                                separate browser for noe development and the default for links.
 #                                --browser firefox installs Firefox instead (Mozilla's apt repo).
 #                                --nobrowser installs none: links go to the Windows default browser.
+#   SSH server:                  openssh-server on 127.0.0.1:2222, keys only, so Cursor/VS Code
+#                                installed on WINDOWS can connect with Remote-SSH (host 'noe-wsl'
+#                                in the Windows ~/.ssh/config, written by this script).
+#                                --no-ssh-server skips it.
 #
 # --headless: for an Ubuntu VM with no desktop (Lima or OrbStack on macOS, a VM on a Linux host).
 #   Skips the WSL checks and settings, the editors and the browser. The editor runs on the host
@@ -35,15 +39,22 @@ BLOCK_END="# <<< noeda-setup <<<"
 QUIET=0
 MIRROR=""
 HEADLESS=0
+SSH_SERVER=1
+SSH_PORT=2222
 BROWSER_CHOICE=""
 BROWSER_PREF_FILE="$HOME/.config/noeda-setup/browser"
-USAGE="Usage: bash $(basename "$0") [--quiet] [--mirror CC] [--browser chrome|firefox | --nobrowser | --headless]
+USAGE="Usage: bash $(basename "$0") [--quiet] [--mirror CC] [--no-ssh-server]
+                [--browser chrome|firefox | --nobrowser | --headless]
   --quiet          hide apt output
   --mirror CC      use the Ubuntu country mirror CC.archive.ubuntu.com (e.g. de, ch, uk, us)
                    instead of archive.ubuntu.com - use it when 'apt-get update' hangs at
                    'Waiting for headers'
   --headless       Ubuntu VM without a desktop (Lima/OrbStack on macOS, a VM on Linux): no WSL
                    settings, no editors, no browser. Connect your editor with Remote-SSH instead.
+  --no-ssh-server  (WSL) do not install the SSH server. By default the script runs openssh-server
+                   on 127.0.0.1:${SSH_PORT} (keys only) and adds a 'noe-wsl' host to your Windows
+                   ~/.ssh/config, so Cursor/VS Code installed on Windows can use Remote-SSH.
+                   Skipping it later does not remove a server installed earlier.
 
 Browser - by default the script installs Google Chrome inside Ubuntu as a separate browser for
 noe development (dev logins and cookies stay apart from your everyday Windows browser), and
@@ -73,6 +84,7 @@ while [ $# -gt 0 ]; do
             [ -z "$BROWSER_CHOICE" ] || { echo "ERROR: give only one of --browser / --nobrowser" >&2; exit 2; }
             BROWSER_CHOICE="nobrowser" ;;
         --headless) HEADLESS=1 ;;
+        --no-ssh-server) SSH_SERVER=0 ;;
         -h|--help) echo "$USAGE"; exit 0 ;;
         *) echo "ERROR: unknown option '$1'." >&2; echo "$USAGE" >&2; exit 2 ;;
     esac
@@ -366,23 +378,7 @@ mv "$tmp" "$HOME/.bashrc"
 info "managed block written"
 
 if [ "$HEADLESS" -eq 1 ]; then
-    # The editor's server is started over a non-interactive SSH session, which never reads the
-    # ~/.bashrc block (Ubuntu's .bashrc returns early). noe's devcontainer_init.sh, run by that
-    # server, mounts whatever SSH_AUTH_SOCK it sees. Let sshd set it for every session instead.
-    # (OrbStack's 'ssh orb' does not go through this sshd; see docs/NOTES.md.)
-    mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
-    printf 'SSH_AUTH_SOCK=/run/user/%s/openssh_agent\n' "$(id -u)" > "$HOME/.ssh/environment"
-    chmod 600 "$HOME/.ssh/environment"
-    if [ -d /etc/ssh/sshd_config.d ]; then
-        printf 'PermitUserEnvironment SSH_AUTH_SOCK\n' | sudo tee /etc/ssh/sshd_config.d/60-noeda.conf >/dev/null
-        sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd 2>/dev/null || true
-        info "sshd sets SSH_AUTH_SOCK for SSH sessions (~/.ssh/environment)"
-    else
-        info "no sshd in this VM: SSH_AUTH_SOCK only comes from the ~/.bashrc block"
-    fi
-    # Keep the user's systemd services (the ssh-agent socket) running between SSH sessions.
-    sudo loginctl enable-linger "$USER" && info "systemd user services kept running (linger)"
-    export SSH_AUTH_SOCK="/run/user/$(id -u)/openssh_agent"
+    export SSH_AUTH_SOCK="/run/user/$(id -u)/openssh_agent"   # sshd side: see "SSH server" below
 else
 # Browser bridge: Linux apps open links in the Windows default browser. wslu's 'wslview' does
 # this on older Ubuntu releases but is not packaged for every release, so ship a tiny opener.
@@ -461,6 +457,93 @@ if ! ssh-add -l >/dev/null 2>&1; then
 fi
 touch "$HOME/.ssh/known_hosts"
 ssh-keygen -F github.com >/dev/null || ssh-keyscan -t ed25519 github.com 2>/dev/null >> "$HOME/.ssh/known_hosts"
+
+# ---------------------------------------------------------------- ssh server
+# For editors that run on the host and connect with Remote-SSH: Windows Cursor/VS Code (WSL), or
+# the macOS editor (--headless VMs). Their server process starts over a non-interactive SSH
+# session, which never reads the ~/.bashrc block (Ubuntu's .bashrc returns early), and noe's
+# devcontainer_init.sh mounts whatever SSH_AUTH_SOCK that process has. So sshd sets it for every
+# session, from ~/.ssh/environment. File name 10-: sshd keeps the first value it reads, and
+# 10- sorts before 50-cloud-init.conf (which can turn password logins on).
+SSHD_CONF=/etc/ssh/sshd_config.d/10-noeda.conf
+write_ssh_environment() {
+    printf 'SSH_AUTH_SOCK=/run/user/%s/openssh_agent\n' "$(id -u)" > "$HOME/.ssh/environment"
+    chmod 600 "$HOME/.ssh/environment"
+}
+if [ "$HEADLESS" -eq 1 ]; then
+    step "SSH server (for Remote-SSH from the host)"
+    write_ssh_environment
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        printf '# Managed by noeda-setup/02-setup-ubuntu.sh\nPermitUserEnvironment SSH_AUTH_SOCK\n' \
+            | sudo tee "$SSHD_CONF" >/dev/null
+        sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd 2>/dev/null || true
+        info "sshd sets SSH_AUTH_SOCK for SSH sessions (~/.ssh/environment)"
+    else
+        info "no sshd in this VM (OrbStack?): SSH_AUTH_SOCK only comes from the ~/.bashrc block"
+    fi
+    sudo loginctl enable-linger "$USER" && info "systemd user services kept running (linger)"
+elif [ "$SSH_SERVER" -eq 1 ]; then
+    step "SSH server (127.0.0.1:${SSH_PORT}, for Cursor/VS Code on Windows over Remote-SSH)"
+    apt_install openssh-server netcat-openbsd
+    write_ssh_environment
+    # Only reachable from this PC. Windows editors connect through 'wsl.exe ... nc' (ProxyCommand
+    # below), which also starts WSL if it is not running and keeps it running while connected.
+    printf '%s\n' "# Managed by noeda-setup/02-setup-ubuntu.sh - overwritten on every run." \
+        "Port ${SSH_PORT}" \
+        "ListenAddress 127.0.0.1" \
+        "PasswordAuthentication no" \
+        "KbdInteractiveAuthentication no" \
+        "PermitRootLogin no" \
+        "PermitUserEnvironment SSH_AUTH_SOCK" | sudo tee "$SSHD_CONF" >/dev/null
+    sudo sshd -t || die "sshd rejected $SSHD_CONF"
+    # Ubuntu starts sshd through ssh.socket (port 22). Run the plain service so Port applies.
+    if systemctl is-enabled ssh.socket >/dev/null 2>&1; then
+        sudo systemctl disable --now ssh.socket >/dev/null 2>&1
+    fi
+    sudo systemctl enable ssh.service >/dev/null 2>&1
+    sudo systemctl restart ssh.service
+    ss -ltn 2>/dev/null | grep -q "127.0.0.1:${SSH_PORT} " \
+        && info "sshd listening on 127.0.0.1:${SSH_PORT} (keys only)" \
+        || warn "sshd does not seem to listen on 127.0.0.1:${SSH_PORT} (check: systemctl status ssh)"
+    sudo loginctl enable-linger "$USER" && info "systemd user services kept running (linger)"
+
+    # Windows side: authorize the Windows user's SSH keys, and add a 'noe-wsl' host entry.
+    WIN_PROFILE="$(cd /mnt/c && /mnt/c/Windows/System32/cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r' || true)"
+    WIN_HOME="$( [ -n "$WIN_PROFILE" ] && wslpath -u "$WIN_PROFILE" 2>/dev/null || true)"
+    if [ -z "$WIN_HOME" ] || [ ! -d "$WIN_HOME" ]; then
+        warn "could not find your Windows profile folder; set up the Windows side by hand (see README)"
+    else
+        touch "$HOME/.ssh/authorized_keys" && chmod 600 "$HOME/.ssh/authorized_keys"
+        found=0
+        for pub in "$WIN_HOME"/.ssh/id_*.pub; do
+            [ -f "$pub" ] || continue
+            found=1
+            key="$(awk '{print $1" "$2}' "$pub")"
+            if ! grep -qF "$key" "$HOME/.ssh/authorized_keys"; then
+                printf '%s windows:%s\n' "$key" "$(basename "$pub")" >> "$HOME/.ssh/authorized_keys"
+                info "authorized Windows key $(basename "$pub")"
+            fi
+        done
+        if [ "$found" -eq 0 ]; then
+            info "No SSH key in your Windows profile yet. To use Remote-SSH from Windows, run in"
+            info "PowerShell:  ssh-keygen -t ed25519   then run this script again."
+        fi
+        WIN_SSH_CONFIG="$WIN_HOME/.ssh/config"
+        mkdir -p "$WIN_HOME/.ssh"
+        if ! grep -qE '^Host[[:space:]]+noe-wsl([[:space:]]|$)' "$WIN_SSH_CONFIG" 2>/dev/null; then
+            [ ! -s "$WIN_SSH_CONFIG" ] || [ -z "$(tail -c1 "$WIN_SSH_CONFIG")" ] || printf '\r\n' >> "$WIN_SSH_CONFIG"
+            printf '%s\r\n' "" "# Added by noeda-setup/02-setup-ubuntu.sh: Ubuntu in WSL, for Remote-SSH." \
+                "Host noe-wsl" \
+                "  HostName 127.0.0.1" \
+                "  Port ${SSH_PORT}" \
+                "  User ${USER}" \
+                "  HostKeyAlias noe-wsl" \
+                "  ProxyCommand C:\\Windows\\System32\\wsl.exe -d ${WSL_DISTRO_NAME:-Ubuntu} -e nc 127.0.0.1 ${SSH_PORT}" \
+                >> "$WIN_SSH_CONFIG"
+            info "added host 'noe-wsl' to $WIN_PROFILE\\.ssh\\config"
+        fi
+    fi
+fi
 
 # ---------------------------------------------------------------- github
 step "GitHub (gh)"
@@ -546,3 +629,9 @@ cat <<EOF
     Ctrl+Shift+P > Dev Containers: Reopen in Container
   Start the editor from this Ubuntu shell, so it inherits SSH_AUTH_SOCK.
 EOF
+if [ "$SSH_SERVER" -eq 1 ]; then
+    cat <<EOF
+  Or use Cursor/VS Code installed on Windows: Remote-SSH: Connect to Host > noe-wsl,
+  then open $NOE_DIR and Reopen in Container.
+EOF
+fi

@@ -83,6 +83,7 @@ flowchart TB
 | 8 | Shell setup | Writes a managed block in `~/.bashrc` (`SSH_AUTH_SOCK`, `BROWSER`, WSL prompt skip) and a browser opener |
 | 9 | Git identity | Asks for name and email if not set |
 | 10 | SSH | Creates an ed25519 key and starts the systemd `ssh-agent` |
+| 10b | SSH server | `openssh-server` on `127.0.0.1:2222`, keys only; authorizes the Windows user's SSH keys and adds host `noe-wsl` to the Windows `~/.ssh/config`, for Windows editors over Remote-SSH (skip with `--no-ssh-server`) |
 | 11 | GitHub | `gh auth login` (browser, device code), uploads the SSH public key, checks `ssh git@github.com` |
 | 12 | Editors | Installs the Dev Containers extension in VS Code and Cursor |
 | 13 | noe checkout | `git clone git@github.com:Noeda-AI/noe.git ~/work/noe` over SSH |

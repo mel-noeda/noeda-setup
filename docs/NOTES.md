@@ -220,6 +220,51 @@ Points to check:
   again. Homebrew itself is **not** uninstalled by the script; remove it by hand if wanted.
 - **Not yet tested:** a full run on a fresh WSL install after this change.
 
+## 2026-11-24: Windows editors, and an SSH server in Ubuntu
+
+Question: "Can I open Cursor in Windows and connect to the WSL environment?" Yes, two ways.
+Both are optional; the default stays the Linux editors through WSLg. README section:
+*Optional: use Cursor or VS Code installed on Windows*.
+
+- **WSL extension** (`cursor --remote wsl+Ubuntu /home/<you>/work/noe`, or *WSL: Connect to
+  WSL*). No setup. This is what the very first attempt used; it failed then only because the
+  folder was `C:\work\noe`. **Open point:** the editor's WSL server is started by `wsl.exe`,
+  not from the Ubuntu shell, so it may not see `SSH_AUTH_SOCK` (the `~/.bashrc` block and
+  `~/.config/environment.d` do not apply to it). Then noe's container gets no agent and Git asks
+  for a login again. Not checked yet.
+- **Remote-SSH to Ubuntu** (now set up by `02-setup-ubuntu.sh` by default; `--no-ssh-server`
+  skips it). Chosen as the recommended way because the agent problem has a clean fix: sshd
+  sets `SSH_AUTH_SOCK` for every session from `~/.ssh/environment` (`PermitUserEnvironment
+  SSH_AUTH_SOCK`). It is also the same route as the macOS sketches, so all hosts can share one
+  editor workflow. What the script does:
+  - `openssh-server` + `netcat-openbsd`; `/etc/ssh/sshd_config.d/10-noeda.conf`: `Port 2222`,
+    `ListenAddress 127.0.0.1`, no password or keyboard-interactive logins, no root login.
+    Named `10-` because sshd keeps the first value it reads and `50-cloud-init.conf` may turn
+    passwords on.
+  - Port 2222, not 22: with mirrored networking WSL shares Windows' ports, and Windows may run its
+    own OpenSSH server on 22.
+  - Ubuntu starts sshd through `ssh.socket` on port 22; the script disables the socket and runs
+    `ssh.service`, so the `Port` setting applies. `loginctl enable-linger` keeps the user's
+    `ssh-agent.socket` running between sessions.
+  - Windows side: authorizes `%UserProfile%\.ssh\id_*.pub` in `~/.ssh/authorized_keys` (the
+    developer runs `ssh-keygen -t ed25519` in PowerShell first, then the script again), and adds
+    to `%UserProfile%\.ssh\config`:
+    ```
+    Host noe-wsl
+      HostName 127.0.0.1
+      Port 2222
+      User <linux user>
+      HostKeyAlias noe-wsl
+      ProxyCommand C:\Windows\System32\wsl.exe -d Ubuntu -e nc 127.0.0.1 2222
+    ```
+    The `ProxyCommand` tunnels through `wsl.exe` instead of the network: it starts WSL if it is
+    stopped, keeps it running while the editor is connected (WSL shuts down when no `wsl.exe`
+    client is left), and works the same with NAT or mirrored networking.
+  - The script does not create a Windows key itself: a private key written from WSL onto NTFS
+    can get permissions that Windows OpenSSH rejects.
+- **Not tested yet:** a full run of the new step, `ssh noe-wsl` from PowerShell, Remote-SSH from
+  Windows Cursor, and Git inside the dev container over that connection.
+
 ## 2026-11-24: design option, the same setup on macOS and Linux hosts
 
 Question: can the WSL idea (all of noe's tooling in one Linux VM that you shut down after work,
@@ -261,6 +306,7 @@ WSL, and macOS only has the VM tool and the editor.
   `~/.bashrc` block. noe's `devcontainer_init.sh` mounts the `SSH_AUTH_SOCK` it sees, so
   `--headless` lets sshd set it for every session (`~/.ssh/environment` with
   `PermitUserEnvironment SSH_AUTH_SOCK`) and enables systemd linger so the agent keeps running.
+  (The same mechanism now serves Windows editors over Remote-SSH; see the entry above.)
 - **Naming:** noe's scripts choose their Docker and SSH handling from the daemon's host name
   (`docker info --format '{{.Name}}'`). A VM named `colima`, `orbstack` or `docker-desktop`
   would take the wrong branch; the sketches refuse those names.

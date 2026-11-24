@@ -95,6 +95,38 @@ cp env.examples/.env.example .env      # first time only
 
 Open http://localhost:5173 and sign in as `dev@example.com`.
 
+### Optional: use Cursor or VS Code installed on Windows
+
+The setup runs the **Linux** editors (their windows appear on the Windows desktop through WSLg).
+If you prefer a native Windows editor window, install Cursor or VS Code on Windows (the
+normal installer, or `.\scripts\win-tools.ps1 --cursor --install` from an admin PowerShell) and
+connect it to Ubuntu. The code, Docker and Git stay in Ubuntu either way. The Windows editor has
+its own sign-in, settings and extensions, separate from the Linux one.
+
+**A. Remote-SSH (recommended).** `02-setup-ubuntu.sh` runs an SSH server in Ubuntu on
+`127.0.0.1:2222` (keys only, not reachable from the network) and adds a host called `noe-wsl` to
+your Windows `%UserProfile%\.ssh\config`. The connection goes through `wsl.exe`, so it also
+starts WSL when it is not running.
+
+1. Once, in PowerShell (not as administrator): `ssh-keygen -t ed25519` (press Enter for the
+   default file; a passphrase is optional).
+2. Run `02-setup-ubuntu.sh` again in Ubuntu, so it authorizes that key.
+3. In Windows Cursor/VS Code: `Ctrl+Shift+P` > **Remote-SSH: Connect to Host** > `noe-wsl`
+   (install the Remote-SSH extension first if asked). Open `/home/<you>/work/noe`, then
+   **Dev Containers: Reopen in Container**.
+
+Test the connection in PowerShell with `ssh noe-wsl`. Git works in the container, because sshd
+gives the editor's server your Ubuntu SSH agent (`SSH_AUTH_SOCK`). To skip the SSH server, run
+the script with `--no-ssh-server`.
+
+**B. The WSL extension.** No SSH needed: in PowerShell run
+`cursor --remote wsl+Ubuntu /home/<you>/work/noe` (or, in the editor, **WSL: Connect to WSL**
+then **File > Open Folder**). The bottom left shows **WSL: Ubuntu**. Check Git before relying on
+it: in the editor's terminal `echo $SSH_AUTH_SOCK` should print `/run/user/1000/openssh_agent`,
+and the container start log should say *SSH agent: mounted*. If not, use option A.
+
+In both cases, `cursor` or `code` typed in an Ubuntu shell still starts the Linux editor.
+
 ## Good to know
 
 - **Your code is on the Linux side.** `~/work/noe` in Ubuntu is not `C:\work\noe`. From Windows,
@@ -111,7 +143,7 @@ Open http://localhost:5173 and sign in as `dev@example.com`.
 ### Options for `02-setup-ubuntu.sh`
 
 ```bash
-bash 02-setup-ubuntu.sh [--quiet] [--mirror CC] [--browser chrome|firefox | --nobrowser]
+bash 02-setup-ubuntu.sh [--quiet] [--mirror CC] [--no-ssh-server] [--browser chrome|firefox | --nobrowser | --headless]
 ```
 
 | Option | Effect |
@@ -121,6 +153,7 @@ bash 02-setup-ubuntu.sh [--quiet] [--mirror CC] [--browser chrome|firefox | --no
 | `--browser chrome` (default) | Google Chrome in Ubuntu, a separate browser for noe logins and cookies |
 | `--browser firefox` | Firefox from Mozilla's apt repository instead |
 | `--nobrowser` | No browser in Ubuntu; links open in your Windows browser |
+| `--no-ssh-server` | Don't install the SSH server for Windows editors (see *Optional: use Cursor or VS Code installed on Windows*). Does not remove one installed earlier. |
 | `--headless` | Ubuntu VM without a desktop (macOS with Lima or OrbStack, a VM on Linux): no WSL settings, editors or browser. **Sketch, untested.** See [docs/NOTES.md](docs/NOTES.md). |
 
 ## Troubleshooting/Known Issues
