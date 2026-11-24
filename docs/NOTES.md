@@ -220,6 +220,136 @@ Points to check:
   again. Homebrew itself is **not** uninstalled by the script; remove it by hand if wanted.
 - **Not yet tested:** a full run on a fresh WSL install after this change.
 
+## 2026-11-24: design option, the same setup on macOS and Linux hosts
+
+Question: can the WSL idea (all of noe's tooling in one Linux VM that you shut down after work,
+with the host almost untouched) work on a Mac, and on a Linux host?
+
+### macOS
+
+A Mac needs a Linux VM for Docker anyway: containers are Linux processes, and Docker Desktop,
+OrbStack and Colima all run a hidden Linux VM. noe already supports macOS directly
+(`developer-documentation/docs/howto/tooling.md` recommends **Colima**; `write_compose_local.sh`
+handles Colima, OrbStack and Docker Desktop). That route keeps the checkout and the tools on
+macOS. The option here goes further: **the checkout and all tools live inside the VM**, like
+WSL, and macOS only has the VM tool and the editor.
+
+| Tool | What it is | Fit |
+|---|---|---|
+| **Lima** (`limactl`) | Open-source lightweight Linux VMs (Apple `vz`), SSH set up for you | Closest free equivalent of WSL; scriptable. **Recommended.** |
+| **OrbStack** | Commercial app: Linux machines + Docker, very fast, well integrated | Feels most like WSL. Paid licence for commercial use. |
+| Colima | Docker runtime built on Lima | Docker only, not a dev VM; this is noe's current macOS route |
+| Multipass | Canonical's Ubuntu VMs | Simple; Ubuntu only |
+| UTM / Parallels / VMware Fusion | Full desktop VMs | Heavier; full Linux desktop if wanted |
+| Apple `container` | Apple's tool, one small VM per container (macOS 26, Apple silicon) | Too new; Dev Containers support unclear |
+
+**Differences from WSL:**
+
+- **No WSLg.** Linux GUI apps cannot show on the Mac desktop nicely (XQuartz is clunky). So the
+  **editor runs on macOS** and connects to the VM with **Remote-SSH**, then *Reopen in
+  Container* runs on the VM's Docker. No Linux browser or `windows-browser` opener is needed:
+  links open in the macOS browser.
+- **Apple silicon is arm64.** noe's images and dependencies must build for arm64; Lima and
+  OrbStack can run amd64 binaries through Rosetta if needed. Chrome has no arm64 Linux build,
+  but the headless route installs no browser.
+- **The VM user must be uid 1000.** noe's container user `vscode` is uid 1000, and the checkout
+  and the SSH agent socket are bind-mounted from the VM. On WSL the first user is uid 1000
+  already. Lima defaults to the macOS uid (usually 501), and OrbStack uses it too, which would
+  make the checkout and the agent socket unwritable in the container. The Lima sketch sets
+  `user.uid = 1000`; the OrbStack sketch creates a separate machine user with uid 1000.
+- **The editor's server starts over a non-interactive SSH session**, which does not read the
+  `~/.bashrc` block. noe's `devcontainer_init.sh` mounts the `SSH_AUTH_SOCK` it sees, so
+  `--headless` lets sshd set it for every session (`~/.ssh/environment` with
+  `PermitUserEnvironment SSH_AUTH_SOCK`) and enables systemd linger so the agent keeps running.
+- **Naming:** noe's scripts choose their Docker and SSH handling from the daemon's host name
+  (`docker info --format '{{.Name}}'`). A VM named `colima`, `orbstack` or `docker-desktop`
+  would take the wrong branch; the sketches refuse those names.
+
+**What carries over:** keep the checkout on the VM's own disk (shared Mac folders are slow, like
+`/mnt/c`); stop the VM to free its CPU and memory (`limactl stop noe`, like `wsl --shutdown`);
+delete it to remove nearly everything (`limactl delete noe`).
+
+**Sketched in this repo (untested, no Mac available yet):**
+
+| File | Does |
+|---|---|
+| `macos/01-install-lima.sh` | Installs Lima with Homebrew; creates VM `noe` from `template://ubuntu-lts` (`vz`, Rosetta on arm64, no host mounts, uid 1000, no agent forwarding); copies in and runs `02-setup-ubuntu.sh --headless`; adds `Include ~/.lima/*/ssh.config` to the top of `~/.ssh/config`; installs Remote-SSH and Dev Containers in Cursor/VS Code if their CLIs exist |
+| `macos/01-install-orbstack.sh` | Installs OrbStack (cask); creates machine `noe`; creates or reuses a uid-1000 user; runs `02-setup-ubuntu.sh --headless` from `/Users/...` (OrbStack shares Mac files); editor extensions as above |
+| `02-setup-ubuntu.sh --headless` | No WSL checks or `wsl.conf`, no VS Code/Cursor, no browser; installs Docker Engine, `gh`, Git, SSH key/agent, clones noe; sshd `SSH_AUTH_SOCK` + linger; prints Remote-SSH next steps |
+
+**Open questions for the first Mac test:**
+
+- [ ] Lima: does `--set '.user.uid = 1000'` work in the installed Lima version, and does
+      `template://ubuntu-lts` give 26.04 (with Ubuntu's `ssh-agent.socket` user unit)?
+- [ ] Which `SSH_AUTH_SOCK` does the editor's server see in the VM (`echo $SSH_AUTH_SOCK` in a
+      Remote-SSH terminal), and does `write_compose_local.sh` report *SSH agent: mounted*?
+- [ ] OrbStack: does `ssh dev@noe@orb` go through OrbStack's own SSH proxy (so
+      `~/.ssh/environment` is ignored) and forward the macOS agent instead? Is Docker Engine
+      inside a machine fine next to OrbStack's own engine?
+- [ ] noe image build and tests on arm64.
+- [ ] Cursor's and VS Code's Remote-SSH extension IDs (`anysphere.remote-ssh`,
+      `ms-vscode-remote.remote-ssh`).
+- [ ] Git pull/push inside the dev container (as for WSL).
+
+### Linux host
+
+Not silly, but less needed. On Linux, noe's dev container runs on the host's own Docker Engine,
+so the extra layer is optional. Options, lightest first:
+
+| Option | Host gets | Notes |
+|---|---|---|
+| **Directly on the host** | Docker Engine, Git, `gh`, editor | noe's standard Linux route. The dev container already isolates the toolchain; the host keeps Docker, the `docker` group (root-equivalent) and the editor. |
+| **Lima on Linux** (KVM/QEMU) | Lima only (+ editor) | Same `01-install-lima.sh` idea and `02-setup-ubuntu.sh --headless`; one documented route for Mac and Linux. |
+| **Incus/LXD system container** | Incus | Full Ubuntu with systemd, shares the host kernel, starts in a second; Docker inside needs `security.nesting=true`. |
+| Multipass, GNOME Boxes, virt-manager | the VM tool | Full VMs; Multipass is the simplest |
+| distrobox / toolbox | podman | Shares your home directory and is built for convenience, not isolation; not this goal |
+
+Recommendation if a VM is wanted on Linux: **Lima**, so Mac and Linux share one route and one
+script. Otherwise install directly; the uid-1000 rule applies there too (the first user on most
+distros is uid 1000).
+
+## Reference: a dev container compared with a dev VM
+
+Written 2026-11-24 in answer to: "If I install tools in the dev container, are they kept after
+I shut it down? How close is a dev container to a real Linux dev box?"
+
+**What survives (noe's dev container):**
+
+| Action | Tools you installed in the container (`apt`, `pip --user`, files under `/home/vscode`) | Checkout | Named volumes (`noe-state`, `pnpm-store`, `frontend-node-modules`) |
+|---|---|---|---|
+| Close the editor (`shutdownAction: stopCompose`) | **Kept**: the container is stopped, not removed | Kept | Kept |
+| Restart the VM / `wsl --shutdown` | Kept | Kept | Kept |
+| **Rebuild Container**, a new image (Dockerfile or toolchain change), `docker compose down` | **Lost**: a new container starts from the image | Kept (bind mount from the VM) | Kept |
+| Switch branch | Treat as **lost**: the image is tagged per branch (`noe:<branch>`), so the container is likely recreated from another image | Kept | Kept |
+| A second checkout folder | Its own container and copy | Separate | Separate per Compose project, except the shared `noe-dev-pnpm-store` |
+
+So treat the container's own filesystem as disposable. To keep a tool:
+
+- **For everyone:** add it to the image (`.devcontainer/Dockerfile`, `install_toolchain.sh`) or
+  to `devcontainer_post_create.sh`.
+- **Just for you:** a dotfiles repository (the Dev Containers *Dotfiles: Repository* setting
+  clones it and runs its install script in every new container), or install it in the VM
+  instead, outside the container.
+
+**How close it is to a real Linux box:**
+
+- **Same:** a full Ubuntu user space, `apt`, a normal shell, your own user (`vscode`) with sudo,
+  the real Linux kernel of the VM.
+- **Different:**
+  - **No systemd or services**: PID 1 runs `sleep infinity`, so `systemctl` does not work.
+    Postgres, Redis, OpenFGA and Dapr run as separate containers in the same Compose project.
+  - **No GUI**; only the folders that are mounted are shared with the VM.
+  - **Docker is the VM's engine**, reached through the mounted `/var/run/docker.sock`. Containers
+    you start from inside (Testcontainers) are siblings, not nested.
+  - **Networking**: its own network namespace; ports reach the host only where published
+    (5173, 8000, 8001, 9090 on `127.0.0.1`).
+  - **Ephemeral by design**: a rebuild resets it, which is the point: everyone gets the same
+    toolchain, and a broken container is fixed by rebuilding.
+
+The two layers do different jobs: **the VM** (WSL, Lima, OrbStack) keeps noe's tooling off the
+host and can be switched off; **the dev container** pins the project's toolchain so every
+developer gets the same one. The VM is the dev box; the container is the project's toolbox.
+
 ## Reference: how Docker runs in the WSL-only setup
 
 Written 2026-11-23 in answer to: "Does WSL run as a Docker container? Where do the containers

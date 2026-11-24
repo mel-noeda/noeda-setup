@@ -19,6 +19,11 @@
 #                                separate browser for noe development and the default for links.
 #                                --browser firefox installs Firefox instead (Mozilla's apt repo).
 #                                --nobrowser installs none: links go to the Windows default browser.
+#
+# --headless: for an Ubuntu VM with no desktop (Lima or OrbStack on macOS, a VM on a Linux host).
+#   Skips the WSL checks and settings, the editors and the browser. The editor runs on the host
+#   and connects to the VM with Remote-SSH. Docker, Git, gh, SSH and the noe checkout are set up
+#   as usual. See macos/ and docs/NOTES.md. (Sketch: not yet tested on a real VM.)
 
 set -euo pipefail
 
@@ -29,13 +34,16 @@ BLOCK_END="# <<< noeda-setup <<<"
 
 QUIET=0
 MIRROR=""
+HEADLESS=0
 BROWSER_CHOICE=""
 BROWSER_PREF_FILE="$HOME/.config/noeda-setup/browser"
-USAGE="Usage: bash $(basename "$0") [--quiet] [--mirror CC] [--browser chrome|firefox | --nobrowser]
+USAGE="Usage: bash $(basename "$0") [--quiet] [--mirror CC] [--browser chrome|firefox | --nobrowser | --headless]
   --quiet          hide apt output
   --mirror CC      use the Ubuntu country mirror CC.archive.ubuntu.com (e.g. de, ch, uk, us)
                    instead of archive.ubuntu.com - use it when 'apt-get update' hangs at
                    'Waiting for headers'
+  --headless       Ubuntu VM without a desktop (Lima/OrbStack on macOS, a VM on Linux): no WSL
+                   settings, no editors, no browser. Connect your editor with Remote-SSH instead.
 
 Browser - by default the script installs Google Chrome inside Ubuntu as a separate browser for
 noe development (dev logins and cookies stay apart from your everyday Windows browser), and
@@ -64,15 +72,19 @@ while [ $# -gt 0 ]; do
         --nobrowser)
             [ -z "$BROWSER_CHOICE" ] || { echo "ERROR: give only one of --browser / --nobrowser" >&2; exit 2; }
             BROWSER_CHOICE="nobrowser" ;;
+        --headless) HEADLESS=1 ;;
         -h|--help) echo "$USAGE"; exit 0 ;;
         *) echo "ERROR: unknown option '$1'." >&2; echo "$USAGE" >&2; exit 2 ;;
     esac
     shift
 done
 
+if [ "$HEADLESS" -eq 1 ]; then
+    [ -z "$BROWSER_CHOICE" ] || { echo "ERROR: --headless installs no browser; drop --browser / --nobrowser" >&2; exit 2; }
+    BROWSER_CHOICE="headless"
 # No --browser / --nobrowser given: keep the choice from an earlier run, else default to Chrome
 # (Firefox on machines where Google ships no Chrome build, i.e. not amd64).
-if [ -z "$BROWSER_CHOICE" ]; then
+elif [ -z "$BROWSER_CHOICE" ]; then
     BROWSER_CHOICE="$(cat "$BROWSER_PREF_FILE" 2>/dev/null || true)"
     case "$BROWSER_CHOICE" in
         chrome|firefox|nobrowser) ;;
@@ -102,7 +114,7 @@ info() { printf '  %s\n' "$*"; }
 warn() { printf '\033[1;33m  WARNING: %s\033[0m\n' "$*"; }
 die()  { printf '\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
-NEEDS_WSL_RESTART=0
+NEEDS_RESTART=0
 
 # The Linux 'cursor' (and 'code') launchers detect WSL and stop at a hidden
 # "Do you want to continue anyway? [y/N]" prompt, recommending the Windows app instead.
@@ -112,11 +124,21 @@ export DONT_PROMPT_WSL_INSTALL=1
 # ---------------------------------------------------------------- preflight
 step "Preflight"
 [ "$(id -u)" -ne 0 ] || die "Run as your normal user, not root (the script uses sudo where needed)."
-grep -qi microsoft /proc/version || die "This script is meant for Ubuntu inside WSL2."
+IS_WSL=0
+grep -qi microsoft /proc/version && IS_WSL=1
+if [ "$IS_WSL" -eq 0 ] && [ "$HEADLESS" -eq 0 ]; then
+    die "This is not WSL. On an Ubuntu VM without a desktop (Lima, OrbStack, a VM on Linux), run with --headless."
+fi
+ENV_LABEL="WSL"; [ "$IS_WSL" -eq 1 ] || ENV_LABEL="VM"
 . /etc/os-release
 [ "${ID:-}" = "ubuntu" ] || die "Expected Ubuntu, found ${ID:-unknown}."
-info "Ubuntu ${VERSION_ID} (${VERSION_CODENAME})"
-[ -d /run/systemd/system ] || die "systemd is not running. Put 'systemd=true' under [boot] in /etc/wsl.conf, run 'wsl --shutdown' in Windows, then retry."
+info "Ubuntu ${VERSION_ID} (${VERSION_CODENAME}), $([ "$IS_WSL" -eq 1 ] && echo WSL || echo 'not WSL')$([ "$HEADLESS" -eq 1 ] && echo ', headless')"
+if [ ! -d /run/systemd/system ]; then
+    if [ "$IS_WSL" -eq 1 ]; then
+        die "systemd is not running. Put 'systemd=true' under [boot] in /etc/wsl.conf, run 'wsl --shutdown' in Windows, then retry."
+    fi
+    die "systemd is not running. Docker Engine and the SSH agent need it; use a VM image that boots with systemd."
+fi
 
 if command -v docker >/dev/null 2>&1 && [ "$(docker info --format '{{.Name}}' 2>/dev/null || true)" = "docker-desktop" ]; then
     die "Docker Desktop is still providing 'docker' here. Uninstall Docker Desktop on Windows first (.\scripts\win-tools.ps1 --docker --uninstall), then run 'wsl --shutdown' and retry."
@@ -126,7 +148,6 @@ sudo -v || die "sudo is required."
 ARCH="$(dpkg --print-architecture)"
 
 # ---------------------------------------------------------------- wsl.conf
-step "WSL settings (/etc/wsl.conf)"
 ensure_wsl_conf() {   # section key value
     local section="$1" key="$2" value="$3"
     sudo touch /etc/wsl.conf
@@ -140,12 +161,15 @@ ensure_wsl_conf() {   # section key value
     else
         printf '\n[%s]\n%s=%s\n' "$section" "$key" "$value" | sudo tee -a /etc/wsl.conf >/dev/null
     fi
-    NEEDS_WSL_RESTART=1
+    NEEDS_RESTART=1
     info "set [${section}] ${key}=${value}"
 }
-ensure_wsl_conf boot systemd true
-# Keep Windows programs (git.exe, code.exe, ...) out of the Linux PATH.
-ensure_wsl_conf interop appendWindowsPath false
+if [ "$IS_WSL" -eq 1 ]; then
+    step "WSL settings (/etc/wsl.conf)"
+    ensure_wsl_conf boot systemd true
+    # Keep Windows programs (git.exe, code.exe, ...) out of the Linux PATH.
+    ensure_wsl_conf interop appendWindowsPath false
+fi
 
 # ---------------------------------------------------------------- apt sources
 step "apt sources"
@@ -176,7 +200,8 @@ apt_install \
 info "git $(git --version | awk '{print $3}')"
 
 # ---------------------------------------------------------------- vendor apt repos
-step "Vendor apt repositories (Docker, VS Code, Cursor, GitHub CLI)"
+if [ "$HEADLESS" -eq 1 ]; then step "Vendor apt repositories (Docker, GitHub CLI)"
+else step "Vendor apt repositories (Docker, VS Code, Cursor, GitHub CLI)"; fi
 sudo install -d -m 0755 /etc/apt/keyrings /usr/share/keyrings
 
 add_key() {   # url dest
@@ -202,6 +227,7 @@ Components: stable
 Architectures: ${ARCH}
 Signed-By: /etc/apt/keyrings/docker.asc"
 
+if [ "$HEADLESS" -eq 0 ]; then
 # VS Code (https://code.visualstudio.com/docs/setup/linux). Same file and key names as
 # Microsoft's instructions, so the package's own repo setup does not add a duplicate.
 if [ ! -s /usr/share/keyrings/microsoft.gpg ]; then
@@ -225,6 +251,7 @@ Suites: stable
 Components: main
 Architectures: ${ARCH}
 Signed-By: /etc/apt/keyrings/cursor.asc"
+fi   # not headless
 
 # GitHub CLI (https://github.com/cli/cli/blob/trunk/docs/install_linux.md#debian)
 add_key https://cli.github.com/packages/githubcli-archive-keyring.gpg /etc/apt/keyrings/githubcli-archive-keyring.gpg
@@ -232,12 +259,14 @@ write_source /etc/apt/sources.list.d/github-cli.list "deb [arch=${ARCH} signed-b
 
 apt_update
 apt_install docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
-apt_install code cursor gh
+if [ "$HEADLESS" -eq 1 ]; then apt_install gh
+else apt_install code cursor gh; fi
 info "gh $(gh --version | head -1 | awk '{print $3}')"
 
 # ---------------------------------------------------------------- browser (optional)
-step "Browser for development ($BROWSER_CHOICE)"
+[ "$HEADLESS" -eq 1 ] || step "Browser for development ($BROWSER_CHOICE)"
 case "$BROWSER_CHOICE" in
+    headless) ;;   # no desktop in the VM: links are opened on the host
     firefox)
         # Mozilla's own .deb (https://support.mozilla.org/kb/install-firefox-linux). Ubuntu's
         # 'firefox' package is only a wrapper that installs the snap, so pin Mozilla's repo higher.
@@ -278,15 +307,19 @@ Signed-By: /etc/apt/keyrings/google-chrome.asc"
         done
         ;;
 esac
-info "docker $(docker --version | awk '{print $3}' | tr -d ,), code $(code --version 2>/dev/null | head -1), cursor $(cursor --version 2>/dev/null | head -1)"
+if [ "$HEADLESS" -eq 1 ]; then
+    info "docker $(docker --version | awk '{print $3}' | tr -d ,)"
+else
+    info "docker $(docker --version | awk '{print $3}' | tr -d ,), code $(code --version 2>/dev/null | head -1), cursor $(cursor --version 2>/dev/null | head -1)"
+fi
 
 # ---------------------------------------------------------------- docker engine
 step "Docker Engine"
 sudo systemctl enable --now docker.service containerd.service >/dev/null 2>&1
 if ! [[ " $(id -nG "$USER") " == *" docker "* ]]; then
     sudo usermod -aG docker "$USER"
-    NEEDS_WSL_RESTART=1
-    info "added $USER to group docker (takes effect after 'wsl --shutdown')"
+    NEEDS_RESTART=1
+    info "added $USER to group docker (takes effect after a restart: 'wsl --shutdown', or stop and start the VM)"
 fi
 # Leftover from Docker Desktop's WSL integration: a credential helper that only exists on Windows.
 if [ -f "$HOME/.docker/config.json" ] && grep -q 'desktop\.exe' "$HOME/.docker/config.json"; then
@@ -304,19 +337,27 @@ case "$BROWSER_CHOICE" in
     *)       BROWSER_DESKTOP="windows-browser.desktop"; BROWSER_CMD="$HOME/.local/bin/windows-browser" ;;
 esac
 SSH_SOCK_LINE='export SSH_AUTH_SOCK="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}/openssh_agent"'
-BLOCK="$BLOCK_BEGIN
+BLOCK_SSH="# systemd user ssh-agent (ssh-agent.socket). The noe dev container forwards this socket.
+$SSH_SOCK_LINE
+# Load the GitHub key once per $ENV_LABEL session (asks for its passphrase).
+if [[ \$- == *i* ]] && [ -S \"\$SSH_AUTH_SOCK\" ] && [ -f \"\$HOME/.ssh/id_ed25519\" ]; then
+    ssh-add -l >/dev/null 2>&1 || ssh-add \"\$HOME/.ssh/id_ed25519\"
+fi"
+if [ "$HEADLESS" -eq 1 ]; then
+    BLOCK="$BLOCK_BEGIN
+# Managed by noeda-setup/02-setup-ubuntu.sh --headless - edits inside this block are overwritten.
+$BLOCK_SSH
+$BLOCK_END"
+else
+    BLOCK="$BLOCK_BEGIN
 # Managed by noeda-setup/02-setup-ubuntu.sh - edits inside this block are overwritten.
 # Linux VS Code/Cursor via WSLg on purpose: skip their 'install the Windows app instead' prompt.
 export DONT_PROMPT_WSL_INSTALL=1
-# systemd user ssh-agent (ssh-agent.socket). The noe dev container forwards this socket.
-$SSH_SOCK_LINE
-# Load the GitHub key once per WSL session (asks for its passphrase).
-if [[ \$- == *i* ]] && [ -S \"\$SSH_AUTH_SOCK\" ] && [ -f \"\$HOME/.ssh/id_ed25519\" ]; then
-    ssh-add -l >/dev/null 2>&1 || ssh-add \"\$HOME/.ssh/id_ed25519\"
-fi
+$BLOCK_SSH
 # Browser for links from gh, Cursor/VS Code sign-in, etc. (choose with --browser).
 export BROWSER=\"$BROWSER_CMD\"
 $BLOCK_END"
+fi
 touch "$HOME/.bashrc"
 tmp="$(mktemp)"
 awk -v b="$BLOCK_BEGIN" -v e="$BLOCK_END" '$0==b{skip=1} !skip{print} $0==e{skip=0}' "$HOME/.bashrc" > "$tmp"
@@ -324,6 +365,25 @@ printf '%s\n' "$BLOCK" >> "$tmp"
 mv "$tmp" "$HOME/.bashrc"
 info "managed block written"
 
+if [ "$HEADLESS" -eq 1 ]; then
+    # The editor's server is started over a non-interactive SSH session, which never reads the
+    # ~/.bashrc block (Ubuntu's .bashrc returns early). noe's devcontainer_init.sh, run by that
+    # server, mounts whatever SSH_AUTH_SOCK it sees. Let sshd set it for every session instead.
+    # (OrbStack's 'ssh orb' does not go through this sshd; see docs/NOTES.md.)
+    mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+    printf 'SSH_AUTH_SOCK=/run/user/%s/openssh_agent\n' "$(id -u)" > "$HOME/.ssh/environment"
+    chmod 600 "$HOME/.ssh/environment"
+    if [ -d /etc/ssh/sshd_config.d ]; then
+        printf 'PermitUserEnvironment SSH_AUTH_SOCK\n' | sudo tee /etc/ssh/sshd_config.d/60-noeda.conf >/dev/null
+        sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd 2>/dev/null || true
+        info "sshd sets SSH_AUTH_SOCK for SSH sessions (~/.ssh/environment)"
+    else
+        info "no sshd in this VM: SSH_AUTH_SOCK only comes from the ~/.bashrc block"
+    fi
+    # Keep the user's systemd services (the ssh-agent socket) running between SSH sessions.
+    sudo loginctl enable-linger "$USER" && info "systemd user services kept running (linger)"
+    export SSH_AUTH_SOCK="/run/user/$(id -u)/openssh_agent"
+else
 # Browser bridge: Linux apps open links in the Windows default browser. wslu's 'wslview' does
 # this on older Ubuntu releases but is not packaged for every release, so ship a tiny opener.
 # It calls the Windows program by full path, which works with appendWindowsPath=false.
@@ -360,6 +420,7 @@ printf 'SSH_AUTH_SOCK=%s/openssh_agent\nDONT_PROMPT_WSL_INSTALL=1\nBROWSER=%s\n'
     "/run/user/$(id -u)" "$BROWSER_CMD" > "$HOME/.config/environment.d/noeda.conf"
 export SSH_AUTH_SOCK="/run/user/$(id -u)/openssh_agent"
 export BROWSER="$BROWSER_CMD"
+fi   # not headless
 
 # ---------------------------------------------------------------- git identity
 step "Git"
@@ -386,7 +447,7 @@ systemctl --user enable --now ssh-agent.socket >/dev/null 2>&1 || warn "could no
 mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
 if [ ! -f "$HOME/.ssh/id_ed25519" ]; then
     info "creating an SSH key for GitHub. Choose a passphrase (recommended)."
-    ssh-keygen -t ed25519 -C "$(git config --global user.email) ($(hostname) WSL)" -f "$HOME/.ssh/id_ed25519"
+    ssh-keygen -t ed25519 -C "$(git config --global user.email) ($(hostname) $ENV_LABEL)" -f "$HOME/.ssh/id_ed25519"
 fi
 if ! grep -q '^Host github.com' "$HOME/.ssh/config" 2>/dev/null; then
     printf 'Host github.com\n  AddKeysToAgent yes\n  IdentityFile ~/.ssh/id_ed25519\n' >> "$HOME/.ssh/config"
@@ -419,7 +480,7 @@ PUB="$(awk '{print $2}' "$HOME/.ssh/id_ed25519.pub")"
 keys="$(gh api user/keys --jq '.[].key' 2>/dev/null || true)"
 case "$keys" in
     *"$PUB"*) info "SSH key already registered on GitHub" ;;
-    *) gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$(hostname) WSL Ubuntu" \
+    *) gh ssh-key add "$HOME/.ssh/id_ed25519.pub" --title "$(hostname) $ENV_LABEL Ubuntu" \
            || warn "could not add the SSH key to GitHub (add it at https://github.com/settings/keys)" ;;
 esac
 ssh_out="$(ssh -T -o BatchMode=yes git@github.com 2>&1 || true)"   # ssh -T always exits 1 on GitHub
@@ -430,6 +491,7 @@ else
 fi
 
 # ---------------------------------------------------------------- editors
+if [ "$HEADLESS" -eq 0 ]; then
 step "Editors"
 # WSLg has no desktop keyring by default; without this, VS Code/Cursor warn at every start.
 for dir in "$HOME/.vscode" "$HOME/.cursor"; do
@@ -444,6 +506,7 @@ case "$cursor_ext" in
     *) cursor --install-extension anysphere.remote-containers >/dev/null 2>&1 \
            && info "Cursor: Dev Containers extension installed" || warn "Cursor extension install failed" ;;
 esac
+fi   # not headless
 
 # ---------------------------------------------------------------- noe checkout
 step "noe checkout ($NOE_DIR)"
@@ -460,7 +523,19 @@ git -C "$NOE_DIR" fetch --quiet origin && info "fetch over SSH: OK"
 
 # ---------------------------------------------------------------- done
 step "Done"
-if [ "$NEEDS_WSL_RESTART" -eq 1 ]; then
+if [ "$HEADLESS" -eq 1 ]; then
+    if [ "$NEEDS_RESTART" -eq 1 ]; then
+        warn "Restart the VM so the docker group applies (Lima: limactl stop noe && limactl start noe; OrbStack: orb restart noe)."
+    fi
+    cat <<EOF
+  Next, on the host (macOS):
+    Cursor or VS Code > Remote-SSH: Connect to Host > the VM (lima-noe, or noe@orb)
+    Open folder $NOE_DIR
+    Ctrl+Shift+P (Cmd+Shift+P) > Dev Containers: Reopen in Container
+EOF
+    exit 0
+fi
+if [ "$NEEDS_RESTART" -eq 1 ]; then
     warn "Restart WSL to apply wsl.conf / docker group: in Windows PowerShell run  wsl --shutdown"
     info "then open Ubuntu again."
 fi

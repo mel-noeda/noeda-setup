@@ -121,6 +121,7 @@ bash 02-setup-ubuntu.sh [--quiet] [--mirror CC] [--browser chrome|firefox | --no
 | `--browser chrome` (default) | Google Chrome in Ubuntu, a separate browser for noe logins and cookies |
 | `--browser firefox` | Firefox from Mozilla's apt repository instead |
 | `--nobrowser` | No browser in Ubuntu; links open in your Windows browser |
+| `--headless` | Ubuntu VM without a desktop (macOS with Lima or OrbStack, a VM on Linux): no WSL settings, editors or browser. **Sketch, untested.** See [docs/NOTES.md](docs/NOTES.md). |
 
 ## Troubleshooting/Known Issues
 
@@ -159,3 +160,7 @@ Removing WSL deletes every distro and its files, so it asks you to type `yes` fi
 - [docs/architecture.md](docs/architecture.md): the stack and the order of operations, as diagrams.
 - [docs/NOTES.md](docs/NOTES.md): working notes, findings and history, including the earlier
   Docker Desktop approach and why it was dropped.
+- `macos/`: **untested sketches** of the same setup on a Mac, with Lima
+  ([`01-install-lima.sh`](macos/01-install-lima.sh)) or OrbStack
+  ([`01-install-orbstack.sh`](macos/01-install-orbstack.sh)). The design and open questions are
+  in [docs/NOTES.md](docs/NOTES.md).
