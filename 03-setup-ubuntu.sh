@@ -424,7 +424,11 @@ if ! grep -q '^Host github.com' "$HOME/.ssh/config" 2>/dev/null; then
     chmod 600 "$HOME/.ssh/config"
     info "added github.com entry to ~/.ssh/config"
 fi
-ssh-add -l >/dev/null 2>&1 || ssh-add "$HOME/.ssh/id_ed25519"
+# Without a working agent (warned above) or if the passphrase prompt fails, carry on: ssh still
+# uses ~/.ssh/id_ed25519 directly via the IdentityFile entry, it just asks for the passphrase.
+if ! ssh-add -l >/dev/null 2>&1; then
+    ssh-add "$HOME/.ssh/id_ed25519" || warn "could not add the SSH key to an agent; Git will ask for its passphrase each time"
+fi
 touch "$HOME/.ssh/known_hosts"
 ssh-keygen -F github.com >/dev/null || ssh-keyscan -t ed25519 github.com 2>/dev/null >> "$HOME/.ssh/known_hosts"
 
