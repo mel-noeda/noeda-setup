@@ -23,6 +23,9 @@
 #     The setup script is copied in instead.
 #   - ssh.forwardAgent false: Git keys live in the VM's own ssh-agent, not in macOS.
 #   - rosetta (Apple silicon): runs amd64 binaries in the arm64 VM, if an image needs it.
+#   - containerd none: Lima's own rootless containerd + nerdctl is not needed; Docker Engine is
+#     installed by 02-setup-ubuntu.sh.
+#   - template ubuntu-26.04, not 'ubuntu-lts': 'ubuntu-lts' moves to the next LTS by itself.
 # Do not name the VM colima, orbstack or docker-desktop: noe's devcontainer scripts pick their
 # Docker/SSH handling from the daemon's host name.
 
@@ -70,24 +73,42 @@ command -v limactl >/dev/null 2>&1 || brew install lima
 info "$(limactl --version)"
 
 step "Ubuntu VM ($NAME)"
-if limactl list --format '{{.Name}}' 2>/dev/null | grep -qx "$NAME"; then
-    info "VM exists"
-else
-    ROSETTA=()
-    [ "$ARCH" = "arm64" ] && ROSETTA=(--rosetta)
-    limactl create --name "$NAME" --tty=false \
-        --vm-type vz "${ROSETTA[@]+"${ROSETTA[@]}"}" \
-        --cpus "$CPUS" --memory "$MEMORY" --disk "$DISK" \
-        --set '.mounts = [] | .user.uid = 1000 | .ssh.forwardAgent = false' \
-        template://ubuntu-lts
-fi
+# Capture first (with pipefail, 'cmd | grep -q' can fail on SIGPIPE even when it matches).
+EXISTING="$(limactl list --format '{{.Name}}' 2>/dev/null || true)"
+case $'\n'"$EXISTING"$'\n' in
+    *$'\n'"$NAME"$'\n'*) info "VM exists (its settings are kept; delete it with 'limactl delete $NAME' to change them)" ;;
+    *)
+        ROSETTA=()
+        [ "$ARCH" = "arm64" ] && ROSETTA=(--rosetta)
+        limactl create --name "$NAME" --tty=false \
+            --vm-type vz "${ROSETTA[@]+"${ROSETTA[@]}"}" \
+            --cpus "$CPUS" --memory "$MEMORY" --disk "$DISK" \
+            --containerd none \
+            --set '.mounts = [] | .user.uid = 1000 | .ssh.forwardAgent = false' \
+            template:ubuntu-26.04 ;;
+esac
 [ "$(limactl list --format '{{.Status}}' "$NAME")" = "Running" ] || limactl start "$NAME"
-VM_UID="$(limactl shell "$NAME" id -u)"
-[ "$VM_UID" = "1000" ] || info "WARNING: VM user has uid $VM_UID, not 1000; Git and file writes in the dev container will fail."
+VM_UID="$(limactl shell "$NAME" id -u | tr -d '\r')"
+[ "$VM_UID" = "1000" ] || die "VM user has uid $VM_UID, not 1000: Git and file writes in the dev container would fail. Delete the VM (limactl delete $NAME) and check the Lima template."
 
 step "Set up Ubuntu inside the VM (02-setup-ubuntu.sh --headless)"
 limactl copy "$SETUP_SCRIPT" "$NAME:/tmp/02-setup-ubuntu.sh"
 limactl shell --workdir / "$NAME" bash /tmp/02-setup-ubuntu.sh --headless "${SETUP_ARGS[@]+"${SETUP_ARGS[@]}"}"
+
+# 02-setup-ubuntu.sh adds the VM user to group docker. A running VM only applies that after a
+# restart (the user's systemd manager keeps its old groups), so restart once if it is pending.
+VM_USER="$(limactl shell "$NAME" id -un | tr -d '\r')"
+GROUPS_NOW="$(limactl shell "$NAME" id -nG | tr -d '\r')"
+GROUPS_NEXT="$(limactl shell "$NAME" id -nG "$VM_USER" | tr -d '\r')"
+case " $GROUPS_NOW " in
+    *" docker "*) ;;
+    *) case " $GROUPS_NEXT " in
+           *" docker "*)
+               step "Restart the VM ($VM_USER joined group docker)"
+               limactl stop "$NAME"
+               limactl start "$NAME" ;;
+       esac ;;
+esac
 
 step "SSH access for the editor"
 # Lima writes ~/.lima/<name>/ssh.config with a 'Host lima-<name>' entry. Include it so the
@@ -101,7 +122,11 @@ if ! grep -qxF "$INCLUDE_LINE" "$HOME/.ssh/config"; then
     chmod 600 "$HOME/.ssh/config"
     info "added '$INCLUDE_LINE' to ~/.ssh/config (backup: config.bak-noeda)"
 fi
-ssh -o BatchMode=yes "lima-$NAME" true && info "ssh lima-$NAME: OK"
+if ssh -o BatchMode=yes "lima-$NAME" true; then
+    info "ssh lima-$NAME: OK"
+else
+    info "WARNING: 'ssh lima-$NAME' failed. Check: limactl list; ~/.lima/$NAME/ssh.config; the Include line in ~/.ssh/config."
+fi
 
 step "Editor extensions (on macOS)"
 if command -v cursor >/dev/null 2>&1; then

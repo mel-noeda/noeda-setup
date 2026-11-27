@@ -325,14 +325,18 @@ delete it to remove nearly everything (`limactl delete noe`).
 
 | File | Does |
 |---|---|
-| `macos/01-install-lima.sh` | Installs Lima with Homebrew; creates VM `noe` from `template://ubuntu-lts` (`vz`, Rosetta on arm64, no host mounts, uid 1000, no agent forwarding); copies in and runs `02-setup-ubuntu.sh --headless`; adds `Include ~/.lima/*/ssh.config` to the top of `~/.ssh/config`; installs Remote-SSH and Dev Containers in Cursor/VS Code if their CLIs exist |
+| `macos/01-install-lima.sh` | Installs Lima with Homebrew; creates VM `noe` from `template:ubuntu-26.04` (`vz`, Rosetta on arm64, no host mounts, uid 1000, no agent forwarding, no Lima containerd); restarts the VM once if `02` added the user to group `docker`; copies in and runs `02-setup-ubuntu.sh --headless`; adds `Include ~/.lima/*/ssh.config` to the top of `~/.ssh/config`; installs Remote-SSH and Dev Containers in Cursor/VS Code if their CLIs exist |
 | `macos/01-install-orbstack.sh` | Installs OrbStack (cask); creates machine `noe`; creates or reuses a uid-1000 user; runs `02-setup-ubuntu.sh --headless` from `/Users/...` (OrbStack shares Mac files); editor extensions as above |
 | `02-setup-ubuntu.sh --headless` | No WSL checks or `wsl.conf`, no VS Code/Cursor, no browser; installs Docker Engine, `gh`, Git, SSH key/agent, clones noe; sshd `SSH_AUTH_SOCK` + linger; prints Remote-SSH next steps |
 
 **Open questions for the first Mac test:**
 
-- [ ] Lima: does `--set '.user.uid = 1000'` work in the installed Lima version, and does
-      `template://ubuntu-lts` give 26.04 (with Ubuntu's `ssh-agent.socket` user unit)?
+- [x] Lima: `--set '.user.uid = 1000'` works (checked 2026-11-27 with Lima 2.2.1: `limactl create`
+      without starting, resolved config has uid 1000, `mounts: None`, `forwardAgent: false`, Rosetta
+      on). `template://ubuntu-lts` resolves to 26.04 but is deprecated and floats to the next LTS,
+      so the script uses `template:ubuntu-26.04`.
+- [ ] Lima: does Ubuntu 26.04 ship `ssh-agent.socket` (user unit), and does its cloud image have
+      no pre-existing uid-1000 user (cloud-init creates the VM user with uid 1000)? Needs a boot.
 - [ ] Which `SSH_AUTH_SOCK` does the editor's server see in the VM (`echo $SSH_AUTH_SOCK` in a
       Remote-SSH terminal), and does `write_compose_local.sh` report *SSH agent: mounted*?
 - [ ] OrbStack: does `ssh dev@noe@orb` go through OrbStack's own SSH proxy (so
